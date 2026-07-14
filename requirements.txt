@@ -1,0 +1,8 @@
+torch>=2.0
+python-chess>=1.10
+gymnasium>=0.29
+numpy>=1.24
+PyYAML>=6.0
+matplotlib>=3.7
+tqdm>=4.66
+pytest>=8.0

@@ -1,0 +1,39 @@
+# GMAI default training configuration
+seed: 42
+episodes: 20000
+max_moves: 200            # truncate marathon games
+gamma: 0.99
+lr: 0.0001
+batch_size: 128
+learn_start: 2000         # transitions before learning kicks in
+train_every: 4            # env steps per gradient step (approx.)
+target_sync_every: 1000
+checkpoint_every: 1000
+log_every: 50
+run_dir: runs
+
+epsilon:
+  start: 1.0
+  end: 0.05
+  decay_steps: 200000
+
+model:
+  channels: 64
+  n_blocks: 4
+  hidden: 512
+
+replay:
+  capacity: 100000
+  prioritized: true
+  alpha: 0.6
+  beta: 0.4
+
+reward:
+  shaping: true           # potential-based material shaping (policy-invariant)
+  draw: -0.1              # slight draw penalty: press for wins vs weak opponents
+
+curriculum:
+  window: 200             # rolling window for win-rate
+  promote_at: 0.85        # win-rate needed to advance a stage
+  pool_size: 5            # frozen snapshots kept for self-play
+  snapshot_every: 500     # episodes between snapshots in stage 3

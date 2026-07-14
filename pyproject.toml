@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gmai"
+version = "0.1.0"
+description = "Grand Master AI - a Deep Reinforcement Learning chess engine (Dueling Double DQN + curriculum self-play)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Luis Miguel Pereira Silva" }]
+dependencies = [
+  "torch>=2.0",
+  "python-chess>=1.10",
+  "gymnasium>=0.29",
+  "numpy>=1.24",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "matplotlib>=3.7", "tqdm>=4.66"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
