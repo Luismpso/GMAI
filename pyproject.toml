@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gmai"
 version = "0.1.0"
-description = "Grand Master AI - a Deep Reinforcement Learning chess engine (Dueling Double DQN + curriculum self-play)"
+description = "Grand Master AI - a search-free Deep RL chess agent for forced-mate endgames"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

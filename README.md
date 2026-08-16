@@ -1,88 +1,117 @@
 # ♟️ GMAI — Grand Master AI
 
-**Deep Reinforcement Learning chess engine** · Dueling Double DQN · Prioritized Experience Replay · legal-action masking · 3-stage curriculum self-play · 70 pytest tests
+**A search-free Deep RL chess agent for forced-mate endgames**, with an exact
+solver for its own domain, honest W/D/L evaluation, and a UCI adapter.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
 ![Gymnasium](https://img.shields.io/badge/Gymnasium-env-2e7d32?style=flat-square)
-![python-chess](https://img.shields.io/badge/python--chess-rules-2e7d32?style=flat-square)
-![Tests](https://img.shields.io/badge/pytest-70%20passed-1b5e20?style=flat-square)
+![Tests](https://img.shields.io/badge/pytest-146%20passed-1b5e20?style=flat-square)
+![UCI](https://img.shields.io/badge/UCI-compatible-2e7d32?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-66bb6a?style=flat-square)
-
-A chess agent that learns **from zero knowledge** — no opening books, no handcrafted evaluation — purely by playing, first against scripted opponents and then against frozen copies of itself.
-
-Builds directly on my RL coursework: the **DQN → Double DQN → Dueling → PER** ladder from my [RL portfolio (AR1)](https://github.com/Luismpso/AR1), and the **curriculum + opponent randomization** recipe from my [autonomous racing agent (AR2)](https://github.com/pedroreis2468/AR2) — here the "randomised domain" is the adversary itself.
 
 ---
 
-## ✨ Highlights
+## 🎯 Scope
+
+GMAI plays **forced-mate endgames**: KQ vs K, KR vs K, KRR vs K.
+
+**Full chess from the opening is out of scope.** That is a deliberate narrowing,
+not an unfinished feature. A DQN without search cannot solve chess from move 1 —
+the reward is too sparse and the horizon too long, which is why AlphaZero pairs
+its network with tree search. Endgames are the regime where the method works on
+its own terms: horizon under 20 moves, mate reachable by exploration, and a
+random-play win-rate of exactly **0.000**, so every point of progress is real
+signal.
+
+Reasoning in [`docs/DESIGN.md`](docs/DESIGN.md).
+
+---
+
+## 📊 Current results
+
+Supervised warm start against the exact solver (48ch × 3 blocks, 20k labelled
+positions, ~9 min CPU). **RL on top of this is in progress.**
+
+| KQ vs K | | W | D | L | win-rate |
+|---|---|---|---|---|---|
+| vs. random defender | **agent** | 84 | 66 | 0 | **0.560** |
+| | random baseline | 3 | 147 | 0 | 0.020 |
+| vs. stubborn defender | **agent** | 74 | 76 | 0 | **0.493** |
+| | random baseline | 0 | 150 | 0 | 0.000 |
+
+Top-1 agreement with provably optimal play: **95.2%** ·
+optimal moves **69.3%** · moves that throw the win away **2.7%**
+
+**Zero losses in 300 games.** The agent does not blunder into defeat — it fails
+to *convert*: 60 threefold repetitions, 45 lost queens, 31 stalemates. That is
+the expected gap between imitating individual moves and executing a ten-move
+plan: a 2.7% per-move error rate compounds over ~9 agent moves into roughly a
+22% chance of throwing away any given game.
+
+Target is 90% on KQ vs K. Not there yet.
+
+---
+
+## 🧠 What's in here
 
 | | |
 |---|---|
-| 🧩 **Custom Gymnasium env** | Single-agent formulation: the env owns the opponent and replies inside `step()` · colours alternate every episode · truncation at 200 moves |
-| 🎭 **Legal-action masking** | The make-or-break trick for DQN on chess: illegal Q-values are masked to −∞ **both** when acting *and* in the bootstrap argmax |
-| 🧠 **Dueling Double DQN** | Conv trunk over 18×8×8 planes → V(s) + A(s,a) heads · Double DQN target removes maximisation bias (van Hasselt 2016) |
-| ⚖️ **Prioritized replay** | Proportional PER on a SumTree (O(log n) sampling) with importance-sampling correction · uniform buffer also available |
-| 🎯 **Policy-invariant shaping** | Potential-based material shaping F(s,s′) = γφ(s′) − φ(s) (Ng et al. 1999) — denser signal, provably unchanged optimal policy |
-| 🏎️ **Curriculum self-play** | random → greedy-material → pool of frozen past selves, promoted on rolling win-rate — the AR2 domain-randomization idea applied to the opponent |
-| 🧪 **70 pytest tests** | Encoding round-trips, mask correctness, dueling identifiability, SumTree proportions, shaping telescoping, checkpoint round-trips |
+| ♟️ **Exact endgame solver** | Retrograde analysis over ~368 000 states. Reproduces textbook theory: KQ vs K mates in **10 moves**, KR vs K in **16**. No tablebase download needed |
+| 🎓 **Supervised warm start** | Provably optimal (position, move) pairs from the solver, cross-entropy pre-training before RL — the AlphaGo recipe with a perfect teacher |
+| 📏 **DTM-quality metric** | Fraction of moves that *worsen* the distance to mate. Interpretable in a way Elo never is |
+| 🧩 **Legal-action masking** | Illegal Q-values masked to −∞ when acting, when bootstrapping, **and** in the dueling baseline |
+| 🧠 **Dueling Double DQN** | Conv trunk → V(s) + A(s,a), GroupNorm, Double DQN target |
+| ⚖️ **Prioritized replay** | Proportional PER on a SumTree with importance-sampling correction |
+| 🎯 **Policy-invariant shaping** | F(s,s′) = γΦ(s′) − Φ(s) with **Φ(terminal) = 0** — verified to 1e-9, so the Ng et al. (1999) guarantee actually holds |
+| 📊 **Separated W/D/L** | Every result reported against a baseline computed on the same positions |
+| 🧪 **146 pytest tests** | Including regression tests for five bugs that silently broke learning |
 
 ---
 
-## 🧠 How it works
+## 🔍 The metric that hid four bugs
 
-### State — 18 binary planes (8×8), always from the mover's POV
+An earlier version reported `score = (W + 0.5·D)/n` and sat at 0.55 for 2 100
+episodes. Measuring the baseline explains it:
 
-The board is vertically mirrored when Black moves, so the network learns a single colour-agnostic representation.
+| | `score` | **pure win-rate** | draws |
+|---|---|---|---|
+| Random vs. random, full chess | **0.499** | **0.065** | 86.8% |
 
-```
- 0–5   own pieces  (P N B R Q K)      13–16  castling rights (own K/Q, opp K/Q)
- 6–11  opp pieces  (P N B R Q K)      17     en-passant square
- 12    side to move
-```
+Since 87% of random games are drawn, the score *starts* at 0.499 and saturates.
+A learning agent and a coin flip look identical. Underneath were five real bugs
+— a dueling baseline averaged over 4 000 illegal actions, BatchNorm in a DQN,
+truncation treated as terminal, shaping that voided its own policy-invariance
+guarantee, and a gradient schedule that never bound.
 
-### Action — `from_square × 64 + to_square` → 4096 discrete actions
-
-Promotions default to a queen (under-promotion is <0.1% of practical moves — documented simplification, full 8×8×73 AlphaZero action space is on the roadmap).
-
-### Learning — masked Double DQN
-
-```
-a*  =  argmax over LEGAL a of  Q_online(s′, a)
-y   =  r + γ · (1 − done) · Q_target(s′, a*)
-```
-
-Huber loss, gradient clipping, target network sync every 1 000 steps, ε-greedy over **legal moves only**.
-
-### Curriculum — three stages, promoted at 85% rolling win-rate
-
-| Stage | Opponent | What the agent learns |
-|---|---|---|
-| 1️⃣ | `RandomOpponent` | the mechanics of winning (deliver mate, don't stalemate) |
-| 2️⃣ | `GreedyMaterialOpponent` (1-ply, mate-aware) | don't hang pieces · punish blunders |
-| 3️⃣ | `OpponentPool` — up to 5 frozen snapshots | strategy vs. a *distribution* of past selves, avoiding the classic self-play overfitting trap |
+All five are fixed, each with a regression test.
+Full write-up: **[`docs/POSTMORTEM.md`](docs/POSTMORTEM.md)**.
 
 ---
 
-## 📂 Project structure
+## 📂 Structure
 
 ```
 GMAI/
-├── configs/default.yaml        # all hyperparameters in one place
-├── notebooks/
-│   └── 01-training-analysis.ipynb   # learning curves + arena report
+├── configs/endgame.yaml        # scope, curriculum, warm start
+├── scripts/pipeline.py         # resumable stages: warmstart / rl / report
 ├── src/gmai/
-│   ├── encoding.py             # board → 18×8×8 planes · move ↔ action id
-│   ├── environment.py          # Gymnasium ChessEnv with action_mask in info
-│   ├── model.py                # DuelingChessNet (conv trunk + V/A heads)
-│   ├── replay_buffer.py        # uniform + PER (SumTree)
-│   ├── agent.py                # Double DQN agent · masked ε-greedy
-│   ├── rewards.py              # terminal + potential-based material shaping
-│   ├── opponents.py            # random · greedy · frozen-snapshot pool
-│   ├── train.py                # curriculum training loop (CSV logging)
-│   ├── evaluate.py             # arena: W/D/L, score, Elo-diff estimate
-│   └── play.py                 # play vs. the agent in the terminal
-└── tests/                      # 70 tests · pytest
+│   ├── tablebase.py            # exact solver (retrograde analysis)
+│   ├── warmstart.py            # supervised pre-training + DTM metric
+│   ├── endgames.py             # position generator
+│   ├── metrics.py              # separated W/D/L instrumentation
+│   ├── encoding.py             # board → 18×8×8 · move ↔ action id
+│   ├── environment.py          # Gymnasium env, terminated ≠ truncated
+│   ├── model.py                # dueling net, masked baseline, GroupNorm
+│   ├── replay_buffer.py        # uniform + PER, stores both masks
+│   ├── agent.py                # Double DQN
+│   ├── rewards.py              # terminal + potential-based shaping
+│   ├── train.py · evaluate.py · play.py · uci.py
+├── docs/
+│   ├── DESIGN.md               # scope, solver, shaping, evaluation
+│   ├── POSTMORTEM.md           # the metric, the five bugs, what generalises
+│   └── PLAYING_ONLINE.md       # UCI + Lichess deployment
+└── tests/                      # 146 tests
 ```
 
 ---
@@ -90,43 +119,60 @@ GMAI/
 ## 🚀 Quickstart
 
 ```bash
-git clone https://github.com/Luismpso/GMAI.git && cd GMAI
 pip install -e ".[dev]"
 
-# train (CPU works; a GPU is strongly recommended for the full run)
-python -m gmai.train --config configs/default.yaml
+# solve the endgame exactly (~85 s, cached to tablebases/)
+python -m gmai.tablebase --kind KQvK
 
-# evaluate a checkpoint in the arena (100 games vs. each baseline)
-python -m gmai.evaluate --checkpoint runs/<run>/final.pt --games 100
+# train: supervised warm start, then curriculum RL
+python -m gmai.train --config configs/endgame.yaml
 
-# play against it
+# evaluate — reports the agent AND the random baseline, side by side
+python -m gmai.evaluate --checkpoint runs/<run>/final.pt --games 200
+
+# play, or expose as a UCI engine
 python -m gmai.play --checkpoint runs/<run>/final.pt --color white
+python -m gmai.uci  --checkpoint runs/<run>/final.pt
 ```
 
-Training artifacts (checkpoints + `logs.csv`) land in `runs/<timestamp>/`; open `notebooks/01-training-analysis.ipynb` to inspect the learning curves.
-
-## 🧪 Tests
+To iterate on one stage at a time without repeating the expensive parts:
 
 ```bash
-pytest -q          # 70 passed
+python scripts/pipeline.py warmstart --kind KQvK --positions 20000 --epochs 16
+python scripts/pipeline.py rl        --kind KQvK --episodes 3000 --epsilon 0.25
+python scripts/pipeline.py report    --kind KQvK
 ```
 
-The suite covers the parts that silently break RL projects: move↔action round-trips on real positions, mask/legal-move equivalence, POV mirroring, dueling mean-centering, SumTree proportional sampling, the telescoping identity of the shaping term, and save/load round-trips.
+```bash
+pytest -q          # 146 passed
+```
+
+---
+
+## 🌐 Playing online
+
+UCI adapter included, so the agent plugs into any chess GUI and into **Lichess**
+via the official [`lichess-bot`](https://github.com/lichess-bot-devs/lichess-bot)
+bridge. Walkthrough in [`docs/PLAYING_ONLINE.md`](docs/PLAYING_ONLINE.md).
+
+> Given the scope, a Lichess bot should advertise that it is only competent in
+> endgames. chess.com's fair-play policy prohibits engine assistance in human
+> games, so there is no legitimate way to deploy there.
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Full **8×8×73 AlphaZero action space** (under-promotions, no from-to ambiguity)
-- [ ] **MCTS + learned prior/value** — the AlphaZero configuration from AR1, scaled up
-- [ ] **PPO baseline** for an on-policy vs. off-policy comparison (closing the loop with AR2)
-- [ ] Elo anchoring vs. **Stockfish at fixed skill levels**
-- [ ] n-step returns + noisy nets (completing the Rainbow checklist)
+- [ ] Reach 90% on KQ vs K, then KR vs K and KRR vs K
+- [ ] Stockfish ladder via `cutechess-cli` with **Elo ± error bars**
+- [ ] FastAPI service with an honest `in_scope` field, Docker, CI/CD
+- [ ] Live Lichess Elo dashboard
+- [ ] Full 8×8×73 action space (under-promotions) if scope ever widens
 
-## 🔗 Related work
+## 🔗 Related
 
-- 🎯 [AR1 — Reinforcement Learning portfolio](https://github.com/Luismpso/AR1) · 5 envs · 20+ algorithms · 71 tests
-- 🏎️ [AR2 — Autonomous FS Racing Agent](https://github.com/pedroreis2468/AR2) · SAC/PPO · procedural tracks · domain randomization
+- 🎯 [AR1 — Reinforcement Learning portfolio](https://github.com/Luismpso/AR1)
+- 🏎️ [AR2 — Autonomous FS Racing Agent](https://github.com/pedroreis2468/AR2)
 
 ## 📄 License
 

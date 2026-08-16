@@ -5,8 +5,18 @@
 by a SumTree for O(log n) sampling, with importance-sampling weights to
 correct the induced bias.
 
-Transitions store the *next-state action mask* so the Double DQN target can
-argmax over legal moves only.
+Transitions store **both** action masks:
+
+``mask``
+    the current state's legal moves, needed because the dueling baseline is
+    the mean advantage over legal actions (see :mod:`gmai.model`);
+``next_mask``
+    the successor's legal moves, so the Double DQN argmax stays legal.
+
+``terminated`` is stored rather than ``done``. A time-limit truncation is
+not a terminal state: its value must still be bootstrapped, otherwise the
+target becomes ``r + 0`` and the agent learns that almost everything is
+worth zero.
 """
 
 from __future__ import annotations
@@ -19,11 +29,12 @@ import numpy as np
 @dataclass
 class Batch:
     states: np.ndarray        # (B, 18, 8, 8) float32
+    masks: np.ndarray         # (B, 4096)     bool   - legal moves in s
     actions: np.ndarray       # (B,)          int64
     rewards: np.ndarray       # (B,)          float32
     next_states: np.ndarray   # (B, 18, 8, 8) float32
-    next_masks: np.ndarray    # (B, 4096)     bool
-    dones: np.ndarray         # (B,)          float32
+    next_masks: np.ndarray    # (B, 4096)     bool   - legal moves in s'
+    terminated: np.ndarray    # (B,)          float32 - TRUE terminal only
     weights: np.ndarray = field(default=None)  # PER IS weights
     indices: np.ndarray = field(default=None)  # PER tree indices
 
@@ -40,14 +51,17 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return len(self._storage)
 
-    def push(self, state, action, reward, next_state, next_mask, done) -> None:
+    def push(
+        self, state, mask, action, reward, next_state, next_mask, terminated
+    ) -> None:
         item = (
             np.asarray(state, dtype=np.float32),
+            np.asarray(mask, dtype=bool),
             int(action),
             float(reward),
             np.asarray(next_state, dtype=np.float32),
             np.asarray(next_mask, dtype=bool),
-            float(done),
+            float(terminated),
         )
         if len(self._storage) < self.capacity:
             self._storage.append(item)
@@ -56,14 +70,15 @@ class ReplayBuffer:
         self._pos = (self._pos + 1) % self.capacity
 
     def _collate(self, items: list[tuple]) -> Batch:
-        s, a, r, ns, nm, d = zip(*items)
+        s, m, a, r, ns, nm, term = zip(*items)
         return Batch(
             states=np.stack(s),
+            masks=np.stack(m),
             actions=np.asarray(a, dtype=np.int64),
             rewards=np.asarray(r, dtype=np.float32),
             next_states=np.stack(ns),
             next_masks=np.stack(nm),
-            dones=np.asarray(d, dtype=np.float32),
+            terminated=np.asarray(term, dtype=np.float32),
         )
 
     def sample(self, batch_size: int) -> Batch:
@@ -131,8 +146,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         self._tree = SumTree(capacity)
         self._max_priority = 1.0
 
-    def push(self, state, action, reward, next_state, next_mask, done) -> None:
-        super().push(state, action, reward, next_state, next_mask, done)
+    def push(
+        self, state, mask, action, reward, next_state, next_mask, terminated
+    ) -> None:
+        super().push(state, mask, action, reward, next_state, next_mask, terminated)
         self._tree.add(self._max_priority**self.alpha)
 
     def sample(self, batch_size: int) -> Batch:

@@ -159,10 +159,11 @@ class TestAgent:
         from gmai.encoding import encode_board
 
         state = encode_board(board)
+        mask = legal_action_mask(board)
         for _ in range(n):
-            action = int(rng.integers(0, N_ACTIONS))
-            buf.push(state, action, float(rng.normal()), state,
-                     legal_action_mask(board), 0.0)
+            action = int(rng.choice(np.flatnonzero(mask)))
+            buf.push(state, mask, action, float(rng.normal()),
+                     state, mask, 0.0)
         return buf
 
     def test_train_step_returns_finite_loss(self, tiny_agent):
@@ -190,3 +191,36 @@ class TestAgent:
             tiny_agent.online.parameters(), fresh.online.parameters()
         ):
             assert torch.equal(po, pf)
+
+    def test_checkpoint_stores_architecture(self, tiny_agent, tmp_path):
+        path = tmp_path / "ckpt.pt"
+        tiny_agent.save(path)
+        ckpt = torch.load(path, map_location="cpu", weights_only=True)
+        assert ckpt["arch"] == {"channels": 8, "n_blocks": 2, "hidden": 32}
+
+    def test_from_checkpoint_rebuilds_non_default_architecture(
+        self, tiny_agent, tmp_path
+    ):
+        """Regression: loading a small model must not assume default sizes."""
+        path = tmp_path / "ckpt.pt"
+        tiny_agent.save(path)
+        restored = DQNAgent.from_checkpoint(path, device="cpu")
+        assert restored.arch == tiny_agent.arch
+        for po, pr in zip(
+            tiny_agent.online.parameters(), restored.online.parameters()
+        ):
+            assert torch.equal(po, pr)
+
+    def test_from_checkpoint_agent_plays_legal_move(self, tiny_agent, tmp_path):
+        path = tmp_path / "ckpt.pt"
+        tiny_agent.save(path)
+        restored = DQNAgent.from_checkpoint(path, device="cpu")
+        board = chess.Board()
+        assert legal_action_mask(board)[restored.act(board, greedy=True)]
+
+    def test_load_with_mismatched_architecture_raises(self, tiny_agent, tmp_path):
+        path = tmp_path / "ckpt.pt"
+        tiny_agent.save(path)
+        other = DQNAgent(channels=16, n_blocks=2, hidden=32, device="cpu", seed=0)
+        with pytest.raises(ValueError, match="architecture"):
+            other.load(path)

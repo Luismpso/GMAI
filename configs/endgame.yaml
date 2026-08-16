@@ -1,0 +1,54 @@
+# GMAI - forced-mate endgames.
+# Scope: KQ vs K, KR vs K, KRR vs K. Full chess is explicitly out of scope.
+seed: 42
+episodes: 40000
+gamma: 0.99
+lr: 0.0003
+batch_size: 128
+learn_start: 2000        # transitions before learning starts
+train_every: 4           # env steps per gradient step (now actually binds)
+target_sync_every: 1000
+checkpoint_every: 5000
+log_every: 200
+run_dir: runs
+
+epsilon:
+  start: 1.0
+  end: 0.05
+  decay_steps: 60000     # endgames are short: decay over steps, not episodes
+
+model:
+  channels: 64
+  n_blocks: 4
+  hidden: 512
+
+replay:
+  capacity: 100000
+  prioritized: true
+  alpha: 0.6
+  beta: 0.4
+
+reward:
+  shaping: true
+  potential: endgame     # material + edge-drive + king proximity
+  draw: -1.0             # in a forced win a draw IS a loss - do not average it to 0.5
+
+curriculum:
+  stages: ["KQvK", "KRvK", "KRRvK"]
+  window: 200            # rolling window for the cheap screen
+  screen_at: 0.60        # noisy epsilon-greedy screen before paying for a real eval
+  eval_every: 200        # episodes between promotion checks
+  eval_games: 200        # greedy games in the promotion eval
+  promote_at:            # PURE win-rate thresholds to advance a stage
+    KQvK: 0.90
+    KRvK: 0.80
+    KRRvK: 0.80
+
+warmstart:                # supervised bootstrap from the exact solver
+  enabled: true
+  positions: 20000
+  epochs: 12
+  batch_size: 256
+  lr: 0.001
+  epsilon_after: 0.30     # start RL with less exploration: the policy isn't random any more
+  cache_dir: tablebases

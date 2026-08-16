@@ -25,3 +25,6 @@ runs/
 .DS_Store
 .vscode/
 .idea/
+
+# Solver output (rebuild with: python -m gmai.tablebase --kind KQvK)
+tablebases/*.npz

@@ -1,97 +1,163 @@
-"""Arena evaluation.
+"""Endgame evaluation.
 
-Plays N games (colours alternating) against each baseline and reports
-W/D/L, score and an Elo *difference* estimate from the logistic model:
+Reports **W/D/L separately** plus termination breakdown, against:
 
-    elo_diff = 400 * log10(score / (1 - score))
+* the random defender the agent was trained on;
+* the *optimal* defender within the endgame (a 2-ply king that maximises
+  survival), which is far harder and closer to the truth;
+
+and computes a random-agent baseline for the same positions, so every number
+has something honest to be compared against.
 
 Usage:
-    python -m gmai.evaluate --checkpoint runs/<run>/final.pt --games 100
+    python -m gmai.evaluate --checkpoint runs/<run>/final.pt --games 200
 """
 
 from __future__ import annotations
 
 import argparse
-import math
+import json
+import random
+from pathlib import Path
 
 import chess
 
 from .agent import DQNAgent
 from .encoding import action_to_move
-from .opponents import GreedyMaterialOpponent, Opponent, RandomOpponent
+from .endgames import ENDGAME_ORDER, sample_endgame
+from .metrics import RollingStats, classify_episode
+from .opponents import Opponent, RandomOpponent
 
 
-def play_game(
-    agent: DQNAgent,
-    opponent: Opponent,
-    agent_color: chess.Color,
-    max_moves: int = 200,
-) -> float:
-    """Return 1 / 0.5 / 0 from the agent's point of view."""
-    board = chess.Board()
+class StubbornKingOpponent(Opponent):
+    """Defender that maximises distance from the enemy king and the edge.
+
+    Not tablebase-optimal, but a much stiffer test than random: it runs for
+    the centre and grabs any hanging piece, which punishes an agent that has
+    only learned to beat a defender that wanders.
+    """
+
+    name = "stubborn"
+
+    def __init__(self, seed: int | None = None):
+        self._rng = random.Random(seed)
+
+    def select_move(self, board: chess.Board) -> chess.Move:
+        me = board.turn
+        best, best_score = [], -float("inf")
+        for move in board.legal_moves:
+            captures = board.is_capture(move)
+            board.push(move)
+            if board.is_stalemate() or board.is_insufficient_material():
+                score = 1e6  # a draw is a total win for the defender
+            elif board.is_checkmate():
+                score = -1e6
+            else:
+                king = board.king(me)
+                enemy = board.king(not me)
+                centre = -max(
+                    abs(chess.square_file(king) - 3.5),
+                    abs(chess.square_rank(king) - 3.5),
+                )
+                score = 10.0 * centre + 2.0 * chess.square_distance(king, enemy)
+                if captures:
+                    score += 500.0
+            board.pop()
+            if score > best_score:
+                best_score, best = score, [move]
+            elif score == best_score:
+                best.append(move)
+        return self._rng.choice(best)
+
+
+def play_endgame(
+    policy, opponent: Opponent, kind: str, rng: random.Random
+) -> tuple[chess.Board, chess.Color, bool]:
+    """Play one endgame. ``policy(board) -> move``. Returns (board, colour, truncated)."""
+    position = sample_endgame(kind, rng=rng)
+    board, strong, limit = position.board, position.strong_color, position.max_moves
+    start_ply = len(board.move_stack)
+
+    truncated = False
     while not board.is_game_over(claim_draw=True):
-        if board.fullmove_number > max_moves:
+        if len(board.move_stack) - start_ply >= 2 * limit:
+            truncated = True
             break
-        if board.turn == agent_color:
-            move = action_to_move(agent.act(board, greedy=True), board)
-        else:
-            move = opponent.select_move(board)
+        move = policy(board) if board.turn == strong else opponent.select_move(board)
         board.push(move)
-
-    outcome = board.outcome(claim_draw=True)
-    if outcome is None or outcome.winner is None:
-        return 0.5
-    return 1.0 if outcome.winner == agent_color else 0.0
+    return board, strong, truncated
 
 
-def elo_diff(score: float) -> float:
-    score = min(max(score, 1e-3), 1 - 1e-3)  # avoid infinities
-    return 400.0 * math.log10(score / (1.0 - score))
+def evaluate_kind(
+    policy, opponent: Opponent, kind: str, games: int, seed: int
+) -> RollingStats:
+    rng = random.Random(seed)
+    stats = RollingStats(window=games)
+    for _ in range(games):
+        board, strong, truncated = play_endgame(policy, opponent, kind, rng)
+        stats.add(classify_episode(board, strong, truncated))
+    return stats
 
 
-def run_arena(agent: DQNAgent, games: int = 100, seed: int = 0) -> dict:
-    baselines: list[Opponent] = [
-        RandomOpponent(seed=seed),
-        GreedyMaterialOpponent(seed=seed),
-    ]
-    report: dict[str, dict] = {}
-    for opponent in baselines:
-        wins = draws = losses = 0
-        for g in range(games):
-            color = chess.WHITE if g % 2 == 0 else chess.BLACK
-            result = play_game(agent, opponent, color)
-            wins += result == 1.0
-            draws += result == 0.5
-            losses += result == 0.0
-        score = (wins + 0.5 * draws) / games
-        report[opponent.name] = {
-            "wins": wins,
-            "draws": draws,
-            "losses": losses,
-            "score": round(score, 3),
-            "elo_diff": round(elo_diff(score), 1),
-        }
+def run_report(agent: DQNAgent | None, games: int = 200, seed: int = 0) -> dict:
+    """Full report: agent and random baseline, vs. two defenders, per endgame."""
+    rng_baseline = random.Random(seed + 7)
+
+    def agent_policy(board: chess.Board) -> chess.Move:
+        return action_to_move(agent.act(board, greedy=True), board)
+
+    def random_policy(board: chess.Board) -> chess.Move:
+        return rng_baseline.choice(list(board.legal_moves))
+
+    report: dict = {}
+    for kind in ENDGAME_ORDER:
+        report[kind] = {}
+        for opponent in (RandomOpponent(seed=seed), StubbornKingOpponent(seed=seed)):
+            entry = {
+                "random_baseline": evaluate_kind(
+                    random_policy, opponent, kind, games, seed
+                ).as_dict()
+            }
+            if agent is not None:
+                entry["agent"] = evaluate_kind(
+                    agent_policy, opponent, kind, games, seed
+                ).as_dict()
+            report[kind][opponent.name] = entry
     return report
 
 
+def print_report(report: dict) -> None:
+    print(f"\n{'endgame':<8} {'defender':<10} {'who':<10} "
+          f"{'W':>4} {'D':>4} {'L':>4} {'win-rate':>9} {'plies':>7}")
+    print("-" * 62)
+    for kind, defenders in report.items():
+        for defender, entries in defenders.items():
+            for who, r in entries.items():
+                print(
+                    f"{kind:<8} {defender:<10} {who:<10} "
+                    f"{r['wins']:>4} {r['draws']:>4} {r['losses']:>4} "
+                    f"{r['win_rate']:>9.3f} {r['mean_plies']:>7.1f}"
+                )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate GMAI in the arena")
-    parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--games", type=int, default=100)
+    parser = argparse.ArgumentParser(description="Evaluate GMAI on endgames")
+    parser.add_argument("--checkpoint", default=None)
+    parser.add_argument("--games", type=int, default=200)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--out", default=None, help="write the report as JSON")
     args = parser.parse_args()
 
-    agent = DQNAgent()
-    agent.load(args.checkpoint)
-    agent.epsilon = 0.0
+    agent = None
+    if args.checkpoint:
+        agent = DQNAgent.from_checkpoint(args.checkpoint)
+        agent.epsilon = 0.0
 
-    report = run_arena(agent, games=args.games, seed=args.seed)
-    print(f"{'opponent':<10} {'W':>4} {'D':>4} {'L':>4} {'score':>7} {'ΔElo':>8}")
-    for name, r in report.items():
-        print(
-            f"{name:<10} {r['wins']:>4} {r['draws']:>4} {r['losses']:>4} "
-            f"{r['score']:>7.3f} {r['elo_diff']:>+8.1f}"
-        )
+    report = run_report(agent, games=args.games, seed=args.seed)
+    print_report(report)
+    if args.out:
+        Path(args.out).write_text(json.dumps(report, indent=2))
+        print(f"\nreport -> {args.out}")
 
 
 if __name__ == "__main__":

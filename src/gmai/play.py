@@ -37,8 +37,7 @@ def main() -> None:
     parser.add_argument("--color", choices=["white", "black"], default="white")
     args = parser.parse_args()
 
-    agent = DQNAgent()
-    agent.load(args.checkpoint)
+    agent = DQNAgent.from_checkpoint(args.checkpoint)
     agent.epsilon = 0.0
 
     human = chess.WHITE if args.color == "white" else chess.BLACK

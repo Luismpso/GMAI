@@ -3,10 +3,19 @@
 Target (van Hasselt et al. 2016), with the argmax restricted to legal moves:
 
     a*  = argmax_{a legal} Q_online(s', a)
-    y   = r + gamma * (1 - done) * Q_target(s', a*)
+    y   = r + gamma * (1 - TERMINATED) * Q_target(s', a*)
 
 Selection uses the online network, evaluation the target network — the
 decoupling that removes vanilla DQN's maximisation bias.
+
+The factor is ``1 - terminated``, **not** ``1 - done``. Truncating
+an episode at the move limit is an artifact of the training loop, not a
+property of the MDP: the successor state still has value and must be
+bootstrapped. Treating truncation as terminal told the agent that the vast
+majority of positions were worth exactly zero.
+
+Every forward pass receives the action mask, because
+the dueling baseline is the mean advantage over *legal* actions.
 """
 
 from __future__ import annotations
@@ -43,6 +52,8 @@ class DQNAgent:
         self.device = torch.device(
             device or ("cuda" if torch.cuda.is_available() else "cpu")
         )
+        # Kept so checkpoints are self-describing (see save/from_checkpoint).
+        self.arch = {"channels": channels, "n_blocks": n_blocks, "hidden": hidden}
         self.online = DuelingChessNet(channels, n_blocks, hidden).to(self.device)
         self.target = DuelingChessNet(channels, n_blocks, hidden).to(self.device)
         self.sync_target()
@@ -69,12 +80,8 @@ class DQNAgent:
             return int(self._rng.choice(np.flatnonzero(mask)))
 
         state = torch.from_numpy(encode_board(board)).unsqueeze(0).to(self.device)
-        was_training = self.online.training
-        self.online.eval()
-        q = self.online(state)
-        if was_training:
-            self.online.train()
-        q = masked_q_values(q, torch.from_numpy(mask).unsqueeze(0).to(self.device))
+        mask_t = torch.from_numpy(mask).unsqueeze(0).to(self.device)
+        q = masked_q_values(self.online(state, mask_t), mask_t)
         return int(q.argmax(dim=1).item())
 
     def decay_epsilon(self) -> None:
@@ -85,25 +92,32 @@ class DQNAgent:
         """One gradient step; returns (loss, per-sample TD errors)."""
         device = self.device
         states = torch.from_numpy(batch.states).to(device)
+        masks = torch.from_numpy(batch.masks).to(device)
         actions = torch.from_numpy(batch.actions).to(device)
         rewards = torch.from_numpy(batch.rewards).to(device)
         next_states = torch.from_numpy(batch.next_states).to(device)
         next_masks = torch.from_numpy(batch.next_masks).to(device)
-        dones = torch.from_numpy(batch.dones).to(device)
+        terminated = torch.from_numpy(batch.terminated).to(device)
 
-        q_sa = self.online(states).gather(1, actions.unsqueeze(1)).squeeze(1)
+        q_sa = self.online(states, masks).gather(1, actions.unsqueeze(1)).squeeze(1)
 
         with torch.no_grad():
-            # Terminal states have empty masks; give them a dummy legal action
-            # (the (1 - done) factor zeroes their contribution anyway).
+            # Terminal successors have empty masks; give them a dummy legal
+            # action so the argmax is well defined. The (1 - terminated)
+            # factor zeroes their contribution anyway.
             safe_masks = next_masks.clone()
             empty = ~safe_masks.any(dim=1)
             safe_masks[empty, 0] = True
 
-            next_q_online = masked_q_values(self.online(next_states), safe_masks)
+            next_q_online = masked_q_values(
+                self.online(next_states, safe_masks), safe_masks
+            )
             best_actions = next_q_online.argmax(dim=1, keepdim=True)
-            next_q_target = self.target(next_states).gather(1, best_actions)
-            targets = rewards + self.gamma * (1.0 - dones) * next_q_target.squeeze(1)
+            next_q_target = self.target(next_states, safe_masks).gather(1, best_actions)
+            targets = (
+                rewards
+                + self.gamma * (1.0 - terminated) * next_q_target.squeeze(1)
+            )
 
         td_errors = q_sa - targets
         if batch.weights is not None:  # PER importance-sampling correction
@@ -133,6 +147,7 @@ class DQNAgent:
         torch.save(
             {
                 "online": self.online.state_dict(),
+                "arch": self.arch,  # makes the checkpoint self-describing
                 "epsilon": self.epsilon,
                 "train_steps": self.train_steps,
             },
@@ -140,8 +155,34 @@ class DQNAgent:
         )
 
     def load(self, path: str | Path) -> None:
+        """Load weights into *this* agent.
+
+        Raises ``ValueError`` if the checkpoint was trained with a different
+        architecture — use :meth:`from_checkpoint` to rebuild it instead.
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
+        arch = ckpt.get("arch")
+        if arch is not None and arch != self.arch:
+            raise ValueError(
+                f"checkpoint architecture {arch} != agent architecture "
+                f"{self.arch}; use DQNAgent.from_checkpoint(path) instead"
+            )
         self.online.load_state_dict(ckpt["online"])
         self.sync_target()
         self.epsilon = ckpt.get("epsilon", self.epsilon_end)
         self.train_steps = ckpt.get("train_steps", 0)
+
+    @classmethod
+    def from_checkpoint(
+        cls, path: str | Path, device: str | None = None, **kwargs
+    ) -> "DQNAgent":
+        """Rebuild an agent with the architecture stored in the checkpoint.
+
+        This is what evaluation, play and UCI entry points should use: it
+        works regardless of which model size the checkpoint was trained with.
+        """
+        head = torch.load(path, map_location="cpu", weights_only=True)
+        arch = head.get("arch", {})
+        agent = cls(device=device, **{**arch, **kwargs})
+        agent.load(path)
+        return agent

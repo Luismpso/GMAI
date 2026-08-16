@@ -23,20 +23,20 @@ class TestModel:
         x = torch.rand(1, N_PLANES, 8, 8)
         assert net(x).shape == (1, N_ACTIONS)  # BatchNorm safe in eval
 
-    def test_dueling_advantage_is_mean_centered(self, net):
-        """Q - V must average ~0 over actions (identifiability constraint)."""
+    def test_dueling_advantage_is_mean_centered_over_legal_actions(self, net):
+        """Q - V must average ~0 over the LEGAL actions."""
         x = torch.rand(2, N_PLANES, 8, 8)
-        z = net.trunk(x)
-        v = net.value_head(z)
-        q = net(x)
-        centered = (q - v).mean(dim=1)
+        mask = torch.zeros(2, N_ACTIONS, dtype=torch.bool)
+        mask[:, :40] = True
+        v = net.value_head(net.trunk(x))
+        centered = ((net(x, mask) - v) * mask).sum(dim=1) / mask.sum(dim=1)
         assert torch.allclose(centered, torch.zeros_like(centered), atol=1e-4)
 
     def test_masked_argmax_is_always_legal(self, net):
         board = chess.Board()
         state = torch.from_numpy(encode_board(board)).unsqueeze(0)
         mask = torch.from_numpy(legal_action_mask(board)).unsqueeze(0)
-        q = masked_q_values(net(state), mask)
+        q = masked_q_values(net(state, mask), mask)
         best = int(q.argmax(dim=1))
         assert mask[0, best]
 
@@ -49,12 +49,16 @@ class TestModel:
         assert out[0, 0] == torch.finfo(torch.float32).min
 
 
-def _dummy_transition(rng, reward=0.0, done=0.0):
+def _dummy_transition(rng, reward=0.0, terminated=0.0):
+    """(state, mask, action, reward, next_state, next_mask, terminated)."""
     state = rng.random((N_PLANES, 8, 8), dtype=np.float32)
     next_state = rng.random((N_PLANES, 8, 8), dtype=np.float32)
     mask = np.zeros(N_ACTIONS, dtype=bool)
     mask[rng.integers(0, N_ACTIONS, size=10)] = True
-    return state, int(rng.integers(0, N_ACTIONS)), reward, next_state, mask, done
+    next_mask = np.zeros(N_ACTIONS, dtype=bool)
+    next_mask[rng.integers(0, N_ACTIONS, size=10)] = True
+    action = int(np.flatnonzero(mask)[0])
+    return state, mask, action, reward, next_state, next_mask, terminated
 
 
 class TestReplayBuffer:
@@ -80,7 +84,9 @@ class TestReplayBuffer:
         batch = buf.sample(16)
         assert batch.states.shape == (16, N_PLANES, 8, 8)
         assert batch.actions.shape == (16,)
+        assert batch.masks.shape == (16, N_ACTIONS)       # current-state mask
         assert batch.next_masks.shape == (16, N_ACTIONS)
+        assert batch.terminated.shape == (16,)            # not `dones`
         assert batch.actions.dtype == np.int64
 
 
