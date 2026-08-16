@@ -120,7 +120,104 @@ plain counter: `env_steps % train_every == 0`.
 
 ---
 
-## 3. What generalises
+## 3. The warm start does not survive RL (open)
+
+Supervised pre-training against the exact solver reaches a 0.52 win-rate on
+KQ vs K. Running RL on top of it drives that to 0.04. The episode length in
+that run fell from 19.2 to 6.6 plies — the agent was ending games faster, by
+drawing.
+
+This is measured, not inferred. Instrumenting the first thousand gradient
+steps from a warm-started checkpoint:
+
+| gradient steps | Q-value scale | win-rate |
+|---|---|---|
+| 0 | 6.41 | 0.212 |
+| 10 | 5.12 | **0.312** |
+| 30 | 4.89 | 0.275 |
+| 100 | 4.30 | 0.125 |
+| 300 | 2.75 | 0.062 |
+| 1000 | 3.21 | 0.062 |
+
+The policy briefly *improves*, then is gone within a few hundred steps — about
+100 episodes. Three contributing causes have been identified, and none of them
+fully accounts for it on its own.
+
+### Scale mismatch
+
+Cross-entropy is invariant to adding a constant to every logit: it fixes the
+*ordering* of moves and says nothing about their magnitude. Measured on a
+warm-started network, Q-values averaged **−293** against a target return range
+of roughly [−1.9, +0.1]. Every TD update then starts with an error near 300,
+and the gradients that close that gap do not preserve what the network learned.
+
+Attempts, all measured on KQ vs K:
+
+| Approach | Q scale | win-rate |
+|---|---|---|
+| Cross-entropy imitation | −293 | **0.52** |
+| Pure Q-regression on exact DTM targets | 0.14 | 0.005 |
+| Regression + ranking term (fixed weight) | 5.17 | 0.29 |
+| Regression + ranking term, annealed | 0.076 | 0.065 |
+| Cross-entropy, then affine calibration | *fit failed* | — |
+
+Regression fixes the scale but not the policy: its loss is dominated by
+predicting `Φ(s)`, the per-position offset, which varies far more across
+positions than the discounted-win term varies across actions within one.
+
+The affine calibration is the most informative failure. Fitting
+`Q_true ≈ α·Q_pred + β` and folding α, β into the output layer would fix the
+scale while provably preserving the ranking — but the least-squares slope came
+out non-positive. Cross-entropy constrains differences *within* a position and
+leaves the level free to drift *between* them, so no single global affine map
+can recover the true values. `calibrate_scale` detects this and declines.
+
+### An un-penalised exit
+
+Correcting the truncation bug (§2) introduced an incentive it did not have
+before. With `draw_reward = -1.0`, the agent's options at the end of an episode
+paid: mate `+1`, stalemate or repetition `−1`, and hitting the move limit `≈0`,
+because a truncated state bootstraps instead of terminating. Stalling was
+strictly the best available outcome, and the agent found it — episode length
+rose from 23.6 to 35.2 plies while the win-rate fell.
+
+The general rule (truncation is not termination) is right; the mistake was
+applying it here. "Mate within N moves" *is* the task in a forced-mate endgame,
+so running out of moves is failing it, exactly like a stalemate. The
+environment now takes `move_limit_is_terminal`, default `True` for endgames.
+
+This removed the stalling behaviour but did not stop the collapse.
+
+### Replay overfitting
+
+With `learn_start: 2000` and one gradient step per four environment steps,
+training begins on a buffer of ~2 900 transitions. Measured over 1 000 gradient
+steps at batch 128, each transition is sampled roughly 44 times — and
+prioritized replay concentrates that further on whichever transitions currently
+have the largest TD error. That is a small-buffer overfitting regime, and it
+lines up with the timescale on which the policy dies.
+
+### Where this stands
+
+An auxiliary imitation loss during RL (DQfD, Hester et al. 2018) is implemented
+as `ImitationAnchor` and was ablated against a matched control from the same
+checkpoint. At `lr=1e-5` it did not help: both arms reached 0.058. That does
+not rule the approach out — the anchor may simply be too weak relative to the
+TD gradient — but it is not evidence for it either, and it is recorded here as
+a negative result rather than presented as a fix.
+
+The next things to try, in order of how much they are expected to matter:
+
+1. **Much larger `learn_start`** (~50 000) and a lower gradient-to-environment
+   step ratio, to leave the small-buffer regime entirely.
+2. **A stronger anchor** — `lr` at 1e-4 rather than 1e-5, and the large-margin
+   loss from DQfD rather than plain cross-entropy.
+3. **Freeze the trunk** for the first few thousand TD steps, letting only the
+   output layers absorb the scale change.
+
+---
+
+## 4. What generalises
 
 **Always measure the baseline before measuring the agent.** One run of
 random-vs-random would have shown that 0.499 was the floor, and the whole
@@ -138,3 +235,14 @@ three different bugs. As "0.5 each" they are indistinguishable.
 2 000 episodes while ε decays from 0.96 to 0.05 is not slow learning. Exploration
 collapsing by an order of magnitude with no change in behaviour means behaviour
 is not driven by what is being learned.
+
+**Measure the transition, not just the endpoints.** Knowing that a warm start
+scores 0.52 and post-RL scores 0.04 says nothing about why. Sampling the
+win-rate every few gradient steps showed the policy dying between step 30 and
+step 300 — which immediately rules out slow drift and points at the first
+updates. That one table was worth more than several full training runs.
+
+**Fixing a bug can install an incentive.** Treating truncation as
+non-terminal is correct in general and made stalling the highest-value action
+in this specific task. A correction that is right in the abstract still has to
+be checked against what the agent can now exploit.

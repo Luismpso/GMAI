@@ -78,6 +78,7 @@ def greedy_eval(agent: DQNAgent, cfg: dict, kind: str, n_games: int) -> RollingS
         use_shaping=False,
         potential_fn=POTENTIALS[cfg["reward"]["potential"]],
         draw_reward=cfg["reward"]["draw"],
+        move_limit_is_terminal=cfg["reward"].get("move_limit_is_terminal", True),
     )
     stats = RollingStats(window=n_games)
     for _ in range(n_games):
@@ -130,6 +131,7 @@ def train(cfg: dict) -> Path:
         use_shaping=cfg["reward"]["shaping"],
         potential_fn=potential_fn,
         draw_reward=cfg["reward"]["draw"],
+        move_limit_is_terminal=cfg["reward"].get("move_limit_is_terminal", True),
         seed=cfg["seed"],
     )
 

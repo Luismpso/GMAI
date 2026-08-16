@@ -6,7 +6,7 @@ solver for its own domain, honest W/D/L evaluation, and a UCI adapter.
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
 ![Gymnasium](https://img.shields.io/badge/Gymnasium-env-2e7d32?style=flat-square)
-![Tests](https://img.shields.io/badge/pytest-146%20passed-1b5e20?style=flat-square)
+![Tests](https://img.shields.io/badge/pytest-161%20passed-1b5e20?style=flat-square)
 ![UCI](https://img.shields.io/badge/UCI-compatible-2e7d32?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-66bb6a?style=flat-square)
 
@@ -31,7 +31,7 @@ Reasoning in [`docs/DESIGN.md`](docs/DESIGN.md).
 ## 📊 Current results
 
 Supervised warm start against the exact solver (48ch × 3 blocks, 20k labelled
-positions, ~9 min CPU). **RL on top of this is in progress.**
+positions, ~9 min CPU).
 
 | KQ vs K | | W | D | L | win-rate |
 |---|---|---|---|---|---|
@@ -51,6 +51,25 @@ plan: a 2.7% per-move error rate compounds over ~9 agent moves into roughly a
 
 Target is 90% on KQ vs K. Not there yet.
 
+### ⚠️ Open problem: RL does not preserve the warm start
+
+Running RL on top of the warm start drives the win-rate **down**, from 0.52 to
+0.04. Instrumenting the first thousand gradient steps shows the policy dying
+between step 30 and step 300:
+
+| gradient steps | Q scale | win-rate |
+|---|---|---|
+| 0 | 6.41 | 0.212 |
+| 30 | 4.89 | 0.275 |
+| 300 | 2.75 | 0.062 |
+
+Three contributing causes are identified and measured — a scale mismatch
+between cross-entropy logits and the return range, an un-penalised stalling
+exit, and replay overfitting on a small buffer. Two are fixed; the collapse is
+not yet closed. Five approaches were tried and are tabulated with their
+results, including the negative ones, in
+**[`docs/POSTMORTEM.md`](docs/POSTMORTEM.md)**.
+
 ---
 
 ## 🧠 What's in here
@@ -65,7 +84,8 @@ Target is 90% on KQ vs K. Not there yet.
 | ⚖️ **Prioritized replay** | Proportional PER on a SumTree with importance-sampling correction |
 | 🎯 **Policy-invariant shaping** | F(s,s′) = γΦ(s′) − Φ(s) with **Φ(terminal) = 0** — verified to 1e-9, so the Ng et al. (1999) guarantee actually holds |
 | 📊 **Separated W/D/L** | Every result reported against a baseline computed on the same positions |
-| 🧪 **146 pytest tests** | Including regression tests for five bugs that silently broke learning |
+| ⚓ **Imitation anchor** | DQfD-style auxiliary loss to keep RL from drifting off the demonstrated policy (ablated against a matched control) |
+| 🧪 **161 pytest tests** | Including regression tests for five bugs that silently broke learning |
 
 ---
 
@@ -94,7 +114,9 @@ Full write-up: **[`docs/POSTMORTEM.md`](docs/POSTMORTEM.md)**.
 ```
 GMAI/
 ├── configs/endgame.yaml        # scope, curriculum, warm start
-├── scripts/pipeline.py         # resumable stages: warmstart / rl / report
+├── scripts/
+│   ├── pipeline.py             # resumable stages: warmstart / rl / report
+│   └── ablate_anchor.py        # A/B the imitation anchor against a control
 ├── src/gmai/
 │   ├── tablebase.py            # exact solver (retrograde analysis)
 │   ├── warmstart.py            # supervised pre-training + DTM metric
@@ -111,7 +133,7 @@ GMAI/
 │   ├── DESIGN.md               # scope, solver, shaping, evaluation
 │   ├── POSTMORTEM.md           # the metric, the five bugs, what generalises
 │   └── PLAYING_ONLINE.md       # UCI + Lichess deployment
-└── tests/                      # 146 tests
+└── tests/                      # 161 tests
 ```
 
 ---
@@ -144,7 +166,7 @@ python scripts/pipeline.py report    --kind KQvK
 ```
 
 ```bash
-pytest -q          # 146 passed
+pytest -q          # 161 passed
 ```
 
 ---
@@ -163,6 +185,7 @@ bridge. Walkthrough in [`docs/PLAYING_ONLINE.md`](docs/PLAYING_ONLINE.md).
 
 ## 🗺️ Roadmap
 
+- [ ] Close the RL-collapse problem: larger `learn_start`, stronger anchor, frozen trunk
 - [ ] Reach 90% on KQ vs K, then KR vs K and KRR vs K
 - [ ] Stockfish ladder via `cutechess-cli` with **Elo ± error bars**
 - [ ] FastAPI service with an honest `in_scope` field, Docker, CI/CD

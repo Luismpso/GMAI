@@ -44,6 +44,7 @@ class ChessEnv(gym.Env):
         agent_color: chess.Color | None = None,
         position_sampler: Callable[[], Any] | None = None,
         max_moves: int = 200,
+        move_limit_is_terminal: bool = True,
         gamma: float = 0.99,
         use_shaping: bool = True,
         potential_fn: PotentialFn = material_potential,
@@ -61,6 +62,7 @@ class ChessEnv(gym.Env):
         self.position_sampler = position_sampler
         self.default_max_moves = max_moves
         self.max_moves = max_moves
+        self.move_limit_is_terminal = move_limit_is_terminal
         self.gamma = gamma
         self.use_shaping = use_shaping
         self.potential_fn = potential_fn
@@ -129,15 +131,30 @@ class ChessEnv(gym.Env):
         if not self.board.is_game_over(claim_draw=True):
             self.board.push(self.opponent.select_move(self.board))
 
-        terminated = self.board.is_game_over(claim_draw=True)
-        # Truncation is a training-loop artifact, reported separately
-        # so the learner still bootstraps the successor's value.
-        truncated = not terminated and self.agent_plies >= 2 * self.max_moves
+        game_over = self.board.is_game_over(claim_draw=True)
+        hit_limit = not game_over and self.agent_plies >= 2 * self.max_moves
+
+        # Whether the move limit ends the *task* or merely the *episode*.
+        #
+        # A cut-off imposed for computational convenience is an artifact of the
+        # training loop: the successor still has value and must be bootstrapped,
+        # so it is reported as `truncated`.
+        #
+        # A forced-mate endgame is different. "Mate within N moves" is the task;
+        # running out of moves is failing it, exactly like a stalemate. Leaving
+        # it un-penalised makes stalling the highest-value option available —
+        # mate pays +1, a draw pays draw_reward, and timing out pays ~0 — and
+        # the agent duly learns to shuffle until the limit. Measured: episode
+        # length rose from 23.6 to 35.2 plies while the win-rate fell to 0.058.
+        terminated = game_over or (hit_limit and self.move_limit_is_terminal)
+        truncated = hit_limit and not self.move_limit_is_terminal
 
         reward = terminal_reward(self.board, self.agent_color, self.draw_reward)
+        if hit_limit and self.move_limit_is_terminal and not game_over:
+            reward += self.draw_reward  # failing to convert is failing
         if self.use_shaping:
             # Phi(terminal) = 0 keeps the shaping policy-invariant; a
-            # truncated state is NOT terminal, so its potential still counts.
+            # *truncated* state is not terminal, so its potential still counts.
             reward += shaping_reward(
                 board_before,
                 self.board,

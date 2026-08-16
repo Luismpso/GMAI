@@ -2,11 +2,17 @@
 # Scope: KQ vs K, KR vs K, KRR vs K. Full chess is explicitly out of scope.
 seed: 42
 episodes: 40000
-gamma: 0.99
+gamma: 0.90            # horizon 1/(1-g) = 10 steps, matching endgame length.
+                       # 0.99 gives a 100-step horizon: mate-in-1 and mate-in-10
+                       # then differ by 0.09, which is noise. See docs/POSTMORTEM.md.
 lr: 0.0003
 batch_size: 128
-learn_start: 2000        # transitions before learning starts
-train_every: 4           # env steps per gradient step (now actually binds)
+learn_start: 50000       # transitions before learning starts. Small buffers are
+                         # an overfitting trap: at 2000, each transition was
+                         # sampled ~44x over 1000 gradient steps (PER concentrates
+                         # it further) and the warm-started policy died within
+                         # ~300 steps. See docs/POSTMORTEM.md.
+train_every: 8           # env steps per gradient step
 target_sync_every: 1000
 checkpoint_every: 5000
 log_every: 200
@@ -30,6 +36,8 @@ replay:
 
 reward:
   shaping: true
+  move_limit_is_terminal: true   # in a forced mate, running out of moves is
+                                 # failing the task - not a harness cut-off
   potential: endgame     # material + edge-drive + king proximity
   draw: -1.0             # in a forced win a draw IS a loss - do not average it to 0.5
 
@@ -46,9 +54,12 @@ curriculum:
 
 warmstart:                # supervised bootstrap from the exact solver
   enabled: true
+  mode: imitation         # imitation | q_regression - see docs/POSTMORTEM.md
   positions: 20000
-  epochs: 12
+  epochs: 16
   batch_size: 256
   lr: 0.001
-  epsilon_after: 0.30     # start RL with less exploration: the policy isn't random any more
+  ce_weight: 2.0          # q_regression only: ranking term, annealed to zero
+  epsilon_after: 0.10     # the policy is no longer random; heavy exploration
+                          # here re-randomises what the warm start just learned
   cache_dir: tablebases
