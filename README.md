@@ -6,7 +6,7 @@ solver for its own domain, honest W/D/L evaluation, and a UCI adapter.
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
 ![Gymnasium](https://img.shields.io/badge/Gymnasium-env-2e7d32?style=flat-square)
-![Tests](https://img.shields.io/badge/pytest-161%20passed-1b5e20?style=flat-square)
+![Tests](https://img.shields.io/badge/pytest-167%20passed-1b5e20?style=flat-square)
 ![UCI](https://img.shields.io/badge/UCI-compatible-2e7d32?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-66bb6a?style=flat-square)
 
@@ -87,7 +87,7 @@ including the negative results, is tabulated in
 | 🎯 **Policy-invariant shaping** | F(s,s′) = γΦ(s′) − Φ(s) with **Φ(terminal) = 0** — verified to 1e-9, so the Ng et al. (1999) guarantee actually holds |
 | 📊 **Separated W/D/L** | Every result reported against a baseline computed on the same positions |
 | ⚓ **Imitation anchor** | DQfD-style auxiliary loss to keep RL from drifting off the demonstrated policy (ablated against a matched control) |
-| 🧪 **161 pytest tests** | Including regression tests for five bugs that silently broke learning |
+| 🧪 **167 pytest tests** | Including regression tests for five bugs that silently broke learning |
 
 ---
 
@@ -136,7 +136,7 @@ GMAI/
 │   ├── DESIGN.md               # scope, solver, shaping, evaluation
 │   ├── POSTMORTEM.md           # the metric, the five bugs, what generalises
 │   └── PLAYING_ONLINE.md       # UCI + Lichess deployment
-└── tests/                      # 161 tests
+└── tests/                      # 167 tests
 ```
 
 ---
@@ -169,16 +169,28 @@ python scripts/pipeline.py report    --kind KQvK
 ```
 
 ```bash
-pytest -q          # 161 passed
+pytest -q          # 167 passed
 ```
 
-If a run dies without a traceback, that is a resource problem rather than a
-logic one. `scripts/doctor.py` exercises each stage separately, reports
-resident memory after each, and projects the peak with a full replay buffer:
+If a run dies without a traceback, Python did not raise — something killed the
+process. `scripts/doctor.py` exercises each stage separately, reports resident
+memory after each, and checks the projected peak against the machine's actual
+RAM:
 
 ```bash
 python scripts/doctor.py
 ```
+
+If it reports headroom, memory is not the cause; the next tool is
+`faulthandler`, which dumps C and Python stacks when the interpreter is killed
+by a signal. It is enabled by default in `gmai.train`, and can be forced with
+`python -X faulthandler -m gmai.train ...`.
+
+Board planes and legal-move masks dominate memory. Masks are stored bit-packed
+in both the dataset and the replay buffer, and arrays are pre-allocated rather
+than built as lists and stacked, which removes a ~350 MB allocation spike that
+was enough to kill a run outright. Details in
+[`docs/POSTMORTEM.md`](docs/POSTMORTEM.md).
 
 ---
 

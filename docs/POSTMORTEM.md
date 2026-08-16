@@ -290,10 +290,62 @@ transition stored two 4 096-element boolean masks at one byte per bool.
 10.84 KB — a full 100 000-capacity buffer drops from 1.74 GB to 1.03 GB. The
 default capacity is now 60 000 (~0.62 GB).
 
+Adding progress output then located the death precisely. All 20 000 positions
+generated fine; the process died at the line that stacks them:
+
+```
+    18000/20000 positions
+    20000/20000 positions, stacking...
+[back to the prompt]
+```
+
+`np.stack` builds a new contiguous array while the list of 20 000 separate
+arrays is still alive, so it briefly holds both — a ~350 MB spike arriving all
+at once, on top of everything already resident. `build_dataset` now
+pre-allocates the output arrays and fills them in place, and stores masks
+bit-packed like the buffer does, unpacking one batch at a time:
+
+| | before | after |
+|---|---|---|
+| states | 92 MB | 92 MB |
+| masks | 82 MB | **10 MB** |
+| peak during construction | ~350 MB | **none** |
+| resident after this stage | 679 MB | **438 MB** |
+
 `scripts/doctor.py` runs each stage in isolation, reports resident memory after
 each, and projects the peak with a full buffer, so the next silent death is a
-number rather than a guess. `build_dataset` also reports progress now, which
-distinguishes "died during generation" from "died while stacking".
+number rather than a guess.
+
+### Memory was the wrong suspect
+
+Running the diagnostic on the affected machine settled it:
+
+```
+total RAM 31.1 GB
+  agent (64ch x 4, hidden 512)      702 MB   device: cuda (RTX 5070 Ti)
+  dataset (20,000 positions)        801 MB
+  one pre-training epoch           1696 MB
+  projected peak with a full buffer: ~2.7 GB
+```
+
+31 GB of RAM. A 350 MB allocation spike was never going to kill that process,
+and every stage completes in isolation, CUDA included. The packing and
+pre-allocation work is a real improvement — 679 MB down to 438 MB resident,
+spike removed — but it was not the cause, and saying so plainly matters more
+than having been right.
+
+The `+895 MB` from a single pre-training epoch looked like a leak and was
+checked directly: memory settles at ~530 MB after the first epoch and stays
+flat across six. That is Adam allocating its per-parameter moment buffers plus
+the caching allocator reserving arena, both one-off.
+
+What should have been reached for immediately, given a process dying with no
+Python traceback: **`faulthandler`**. It dumps C and Python stacks when the
+interpreter is killed by a signal, which is exactly the case a missing
+traceback describes. It is now enabled by default in `gmai.train`, and the
+diagnostic prints the manual invocation when it finds memory headroom to
+spare. Three rounds of memory measurement preceded the one tool built for the
+symptom actually observed.
 
 ---
 
@@ -331,6 +383,23 @@ be checked against what the agent can now exploit.
 Python reports its own exceptions. Silence means something outside Python
 ended the process, and the first move is to measure the resource rather than
 reread the code.
+
+**Print progress before you need it.** Two runs died at an unknown point
+inside a 60-second function. One line of progress output turned that into an
+exact location — the stacking step, not the generation — and the fix followed
+immediately. Long-running steps should say where they are, always.
+
+**Watch for allocation spikes, not just totals.** Steady-state memory is not
+the whole picture: `np.stack` holds the input list and the output array at the
+same time. Pre-allocating and filling in place reaches the same end state
+without the spike. (This turned out not to be the crash, but it was worth
+fixing regardless.)
+
+**Check the constraint before optimising against it.** Three rounds of memory
+work went by before anyone measured the machine's RAM — 31 GB, against a 2.7 GB
+peak. The measurement that would have redirected the whole investigation took
+one line and came last. When a hypothesis is cheap to falsify, falsify it
+first.
 
 **Know what a loss function actually constrains.** Cross-entropy fixes the
 ranking of outputs and says nothing about their magnitude — obvious in

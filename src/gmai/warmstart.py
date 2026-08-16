@@ -54,9 +54,31 @@ class QWarmStartData:
 
 @dataclass
 class WarmStartData:
-    states: np.ndarray   # (N, 18, 8, 8) float32
-    masks: np.ndarray    # (N, 4096)     bool
-    targets: np.ndarray  # (N,)          int64 - an optimal action
+    """Imitation targets, stored compactly.
+
+    Masks are kept **bit-packed** (512 bytes rather than 4 096 per position)
+    and unpacked one batch at a time. At 20 000 positions that is 82 MB of
+    mask down to 10 MB, and the arrays are pre-allocated rather than built as
+    a list and stacked — ``np.stack`` briefly holds both the list and the
+    result, and that peak was enough to kill an 8 GB machine outright, with no
+    traceback.
+    """
+
+    states: np.ndarray        # (N, 18, 8, 8) float32
+    masks_packed: np.ndarray  # (N, 512)      uint8
+    targets: np.ndarray       # (N,)          int64
+
+    def __len__(self) -> int:
+        return len(self.targets)
+
+    def masks_for(self, idx) -> np.ndarray:
+        """Unpack the legal-move masks for a batch of indices."""
+        return np.unpackbits(self.masks_packed[idx], axis=1).astype(bool)
+
+    @property
+    def masks(self) -> np.ndarray:
+        """The full dense mask array. Allocates — prefer :meth:`masks_for`."""
+        return np.unpackbits(self.masks_packed, axis=1).astype(bool)
 
 
 def build_dataset(
@@ -73,14 +95,18 @@ def build_dataset(
     useful curriculum: learn to finish first, then learn to make progress.
     """
     rng = random.Random(seed)
-    states, masks, targets = [], [], []
+    # Pre-allocated: no list-then-stack peak.
+    states = np.empty((n_positions, 18, 8, 8), dtype=np.float32)
+    masks_packed = np.empty((n_positions, N_ACTIONS // 8), dtype=np.uint8)
+    targets = np.empty(n_positions, dtype=np.int64)
+    count = 0
 
     attempts = 0
     next_report = max(1, n_positions // 10)
-    while len(states) < n_positions and attempts < n_positions * 50:
+    while count < n_positions and attempts < n_positions * 50:
         attempts += 1
-        if verbose and len(states) >= next_report:
-            print(f"    {len(states):>6}/{n_positions} positions", flush=True)
+        if verbose and count >= next_report:
+            print(f"    {count:>6}/{n_positions} positions", flush=True)
             next_report += max(1, n_positions // 10)
         position = sample_endgame(kind, rng=rng)
         board, strong = position.board, position.strong_color
@@ -96,21 +122,23 @@ def build_dataset(
         if not best:
             continue
 
-        states.append(encode_board(board))
-        masks.append(legal_action_mask(board))
-        targets.append(move_to_action(rng.choice(best), board))
+        states[count] = encode_board(board)
+        masks_packed[count] = np.packbits(legal_action_mask(board))
+        targets[count] = move_to_action(rng.choice(best), board)
+        count += 1
 
-    if not states:
+    if count == 0:
         raise RuntimeError(
             f"no usable {kind} positions found after {attempts} attempts — "
             "is the tablebase for this endgame built?"
         )
     if verbose:
-        print(f"    {len(states)}/{n_positions} positions, stacking...", flush=True)
+        mb = (states[:count].nbytes + masks_packed[:count].nbytes) / 1e6
+        print(f"    {count}/{n_positions} positions ready ({mb:.0f} MB)", flush=True)
     return WarmStartData(
-        states=np.stack(states),
-        masks=np.stack(masks),
-        targets=np.asarray(targets, dtype=np.int64),
+        states=states[:count],
+        masks_packed=masks_packed[:count],
+        targets=targets[:count],
     )
 
 
@@ -324,8 +352,6 @@ def pretrain(
     device = agent.device
     optimizer = torch.optim.Adam(agent.online.parameters(), lr=lr)
 
-    states = torch.from_numpy(data.states)
-    masks = torch.from_numpy(data.masks)
     targets = torch.from_numpy(data.targets)
     n = len(targets)
 
@@ -336,8 +362,9 @@ def pretrain(
         losses, correct = [], 0
         for start in range(0, n, batch_size):
             idx = perm[start : start + batch_size]
-            s = states[idx].to(device)
-            m = masks[idx].to(device)
+            npidx = idx.numpy()
+            s = torch.from_numpy(data.states[npidx]).to(device)
+            m = torch.from_numpy(data.masks_for(npidx)).to(device)
             y = targets[idx].to(device)
 
             logits = agent.online(s, m)
@@ -397,8 +424,7 @@ class ImitationAnchor:
         seed: int | None = None,
     ):
         self.agent = agent
-        self.states = torch.from_numpy(data.states)
-        self.masks = torch.from_numpy(data.masks)
+        self.data = data
         self.targets = torch.from_numpy(data.targets)
         self.batch_size = batch_size
         self.every = max(1, every)
@@ -416,8 +442,9 @@ class ImitationAnchor:
             0, len(self.targets), (self.batch_size,), generator=self._generator
         )
         device = self.agent.device
-        s = self.states[idx].to(device)
-        m = self.masks[idx].to(device)
+        npidx = idx.numpy()
+        s = torch.from_numpy(self.data.states[npidx]).to(device)
+        m = torch.from_numpy(self.data.masks_for(npidx)).to(device)
         y = self.targets[idx].to(device)
 
         logits = self.agent.online(s, m)

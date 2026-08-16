@@ -176,3 +176,41 @@ class TestCalibrateScale:
         calibrate_scale(agent, data, verbose=False)
         for po, pt in zip(agent.online.parameters(), agent.target.parameters()):
             assert torch.equal(po, pt)
+
+
+class TestWarmStartDataPacking:
+    """Regression: the dense mask array and the np.stack spike killed a run."""
+
+    @pytest.fixture
+    def data(self):
+        from gmai.warmstart import build_dataset
+
+        return build_dataset("KQvK", _table_or_skip(), 40, seed=0, verbose=False)
+
+    def test_masks_are_stored_packed(self, data):
+        assert data.masks_packed.dtype == np.uint8
+        assert data.masks_packed.shape == (len(data), N_ACTIONS // 8)
+
+    def test_packing_is_eight_times_smaller(self, data):
+        assert data.masks_packed.nbytes * 8 == data.masks.nbytes
+
+    def test_masks_for_round_trips(self, data):
+        idx = np.array([0, 3, 7])
+        assert np.array_equal(data.masks_for(idx), data.masks[idx])
+
+    def test_targets_are_legal_in_the_unpacked_mask(self, data):
+        masks = data.masks_for(np.arange(len(data)))
+        assert masks[np.arange(len(data)), data.targets].all()
+
+    def test_arrays_are_exactly_sized(self, data):
+        """Pre-allocation must be trimmed to the number actually produced."""
+        n = len(data)
+        assert data.states.shape[0] == n
+        assert data.masks_packed.shape[0] == n
+        assert n <= 40
+
+    def test_empty_result_raises_a_clear_error(self):
+        from gmai.warmstart import build_dataset
+
+        with pytest.raises(RuntimeError, match="no usable"):
+            build_dataset("KQvK", _table_or_skip(), 0, seed=0, verbose=False)

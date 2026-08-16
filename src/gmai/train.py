@@ -20,9 +20,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import faulthandler
 import json
 import time
 from pathlib import Path
+
+# A native crash (bad CUDA kernel, MKL fault, stack overflow) kills the process
+# without a Python traceback, which looks identical to a clean exit. This makes
+# the interpreter dump C and Python stacks on the way out instead.
+faulthandler.enable()
 
 import chess
 import yaml
