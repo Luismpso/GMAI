@@ -127,8 +127,25 @@ KQ vs K. Running RL on top of it drives that to 0.04. The episode length in
 that run fell from 19.2 to 6.6 plies — the agent was ending games faster, by
 drawing.
 
-This is measured, not inferred. Instrumenting the first thousand gradient
-steps from a warm-started checkpoint:
+A later run made the boundary unmistakable. With `learn_start: 50000` and
+~8.65 environment steps per episode, the buffer does not fill until episode
+**5780** — so every episode before that is the warm start running untouched,
+with zero gradient steps:
+
+```
+ep 5000 | win-rate 0.560     <- no training yet, buffer still filling
+ep 5600 | win-rate 0.500
+ep 5800 | win-rate 0.415     <- TD learning starts at ~5780
+ep 6000 | win-rate 0.205
+ep 6400 | win-rate 0.020
+```
+
+The policy is flat for 5 800 episodes and gone within 600 of the first
+gradient step. That also **rules out replay overfitting**: the buffer held
+50 000 transitions, and it collapsed anyway.
+
+Instrumenting the first thousand gradient steps from a warm-started checkpoint
+gives the same picture at finer resolution:
 
 | gradient steps | Q-value scale | win-rate |
 |---|---|---|
@@ -188,14 +205,38 @@ environment now takes `move_limit_is_terminal`, default `True` for endgames.
 
 This removed the stalling behaviour but did not stop the collapse.
 
-### Replay overfitting
+### Replay overfitting — investigated and ruled out
 
-With `learn_start: 2000` and one gradient step per four environment steps,
-training begins on a buffer of ~2 900 transitions. Measured over 1 000 gradient
-steps at batch 128, each transition is sampled roughly 44 times — and
-prioritized replay concentrates that further on whichever transitions currently
-have the largest TD error. That is a small-buffer overfitting regime, and it
-lines up with the timescale on which the policy dies.
+With `learn_start: 2000`, training begins on a buffer of ~2 900 transitions;
+over 1 000 gradient steps at batch 128 each transition is sampled roughly 44
+times, and prioritized replay concentrates that further. That looked like a
+plausible contributor.
+
+It is not the cause. Raising `learn_start` to 50 000 delayed the onset of
+training to episode 5 780 and changed nothing about what happened afterwards —
+the collapse was, if anything, faster. A negative result, but a clean one: it
+removes buffer size from the list.
+
+### Why the scale cannot simply be calibrated away
+
+The affine calibration was retried with the slope estimated from
+**within-position deviations only**, on the reasoning that cross-entropy
+constrains Q differences inside a position even if the overall level drifts
+between positions. The slope came out non-positive again.
+
+That is not a bug — it is what cross-entropy does. The loss maximises the
+logit of the correct move and pushes every other logit down through the
+log-sum-exp, with nothing distinguishing a good alternative from a terrible
+one. So a pre-trained network reliably knows *which* move is best and carries
+almost no information about *how much* each move is worth. There is no linear
+relationship to recover, at any level of centring.
+
+Removing the `Phi(s)` offset from the regression targets was also tried, on
+the reasoning that shaping only existed to solve exploration and the warm
+start already solves it. That fixed the scale precisely — Q settled at 0.970
+against a target of ~0.9 — but the policy stayed weak: 50% optimal moves
+against 80% from cross-entropy, and a 0.025 win-rate. Converting KQ vs K in
+under 15 moves seems to need roughly 80% optimal play; 50% is not enough.
 
 ### Where this stands
 
@@ -208,12 +249,22 @@ a negative result rather than presented as a fix.
 
 The next things to try, in order of how much they are expected to matter:
 
-1. **Much larger `learn_start`** (~50 000) and a lower gradient-to-environment
-   step ratio, to leave the small-buffer regime entirely.
-2. **A stronger anchor** — `lr` at 1e-4 rather than 1e-5, and the large-margin
+1. **A much lower RL learning rate.** The runs above used `lr: 3e-4`, which is
+   a fine-tuning rate for a network that is already close to its target and far
+   too high for one that has to travel several units in output space. 1e-6 to
+   1e-5 would give the policy orders of magnitude more updates to adapt in.
+2. **A less punitive `draw_reward`.** At -1.0, with the agent drawing ~48% of
+   games, the expected value of almost every state is strongly negative and the
+   difference between a good move and a bad one is small against that. Setting
+   it to 0 makes wins the only signal that moves the value, which may be the
+   easier learning problem even though it is the less faithful reward.
+3. **A stronger anchor** — `lr` at 1e-4 rather than 1e-5, and the large-margin
    loss from DQfD rather than plain cross-entropy.
-3. **Freeze the trunk** for the first few thousand TD steps, letting only the
+4. **Freeze the trunk** for the first few thousand TD steps, letting only the
    output layers absorb the scale change.
+
+`scripts/ablate_anchor.py` runs any of these against a matched control from the
+same checkpoint in a few minutes per arm.
 
 ---
 
@@ -246,3 +297,10 @@ updates. That one table was worth more than several full training runs.
 non-terminal is correct in general and made stalling the highest-value action
 in this specific task. A correction that is right in the abstract still has to
 be checked against what the agent can now exploit.
+
+**Know what a loss function actually constrains.** Cross-entropy fixes the
+ranking of outputs and says nothing about their magnitude — obvious in
+hindsight, and the reason a warm-started network can be simultaneously a good
+policy and unusable Q-values. Two separate attempts to recover the scale
+failed for that one reason, and a moment's thought about what the loss
+constrains would have predicted both.

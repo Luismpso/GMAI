@@ -436,17 +436,26 @@ def calibrate_scale(
     destroy the learned representation — measured here at Q ~= -293 against a
     target range of [-1.9, +0.1].
 
-    Rather than retrain, fit ``Q_true ~= alpha * Q_pred + beta`` by least
-    squares and fold the two coefficients into the output layers. Because the
-    dueling head is ``Q = V + A - mean(A)``, scaling both heads' final weights
-    by ``alpha`` and shifting the value bias by ``beta`` reproduces
-    ``alpha * Q + beta`` exactly. With ``alpha > 0`` the ranking — and
-    therefore the greedy policy — is provably unchanged.
+    Rather than retrain, fit ``Q_true ~= alpha * Q_pred + beta`` and fold the
+    two coefficients into the output layers. Because the dueling head is
+    ``Q = V + A - mean(A)``, scaling both heads' final weights by ``alpha`` and
+    shifting the value bias by ``beta`` reproduces ``alpha * Q + beta``
+    exactly. With ``alpha > 0`` the ranking — and therefore the greedy policy —
+    is provably unchanged.
+
+    The slope is estimated from **within-position deviations only**. A naive
+    pooled regression over all (state, action) pairs returns a non-positive
+    slope and the fit has to be abandoned: cross-entropy constrains Q
+    differences *inside* a position and leaves the overall level free to drift
+    *between* positions, so the pooled covariance is dominated by
+    between-position noise that carries no signal. Centring each position
+    first isolates exactly the structure the pre-training actually learned.
+    The intercept then comes from the global means.
     """
     device = agent.device
     agent.online.eval()
 
-    preds, trues = [], []
+    dev_x, dev_y, flat_x, flat_y = [], [], [], []
     for start in range(0, len(data.states), 256):
         s_ = torch.from_numpy(data.states[start : start + 256]).to(device)
         a_ = torch.from_numpy(data.actions[start : start + 256]).to(device)
@@ -455,17 +464,27 @@ def calibrate_scale(
 
         mask = torch.zeros(len(s_), N_ACTIONS, dtype=torch.bool, device=device)
         mask.scatter_(1, a_, v_)
-        q = agent.online(s_, mask).gather(1, a_)
-        preds.append(q[v_].flatten().cpu())
-        trues.append(y_[v_].flatten().cpu())
+        q = agent.online(s_, mask).gather(1, a_).double()
+        y_ = y_.double()
+        vf = v_.double()
+        n = vf.sum(dim=1, keepdim=True).clamp(min=1.0)
 
-    x = torch.cat(preds).double()
-    y = torch.cat(trues).double()
-    var = x.var()
-    alpha = float(((x - x.mean()) * (y - y.mean())).mean() / var) if var > 0 else 1.0
-    if alpha <= 0:  # degenerate fit: leave the network alone
+        # Per-position means, then deviations from them.
+        qx = (q * vf).sum(dim=1, keepdim=True) / n
+        qy = (y_ * vf).sum(dim=1, keepdim=True) / n
+        dev_x.append((q - qx)[v_].flatten().cpu())
+        dev_y.append((y_ - qy)[v_].flatten().cpu())
+        flat_x.append(q[v_].flatten().cpu())
+        flat_y.append(y_[v_].flatten().cpu())
+
+    dx, dy = torch.cat(dev_x), torch.cat(dev_y)
+    x, y = torch.cat(flat_x), torch.cat(flat_y)
+
+    var = (dx * dx).mean()
+    alpha = float((dx * dy).mean() / var) if var > 0 else 1.0
+    if alpha <= 0:  # no usable within-position signal
         if verbose:
-            print("  [calibrate] non-positive slope, skipping")
+            print("  [calibrate] non-positive within-position slope, skipping")
         return 1.0, 0.0
     beta = float(y.mean() - alpha * x.mean())
 

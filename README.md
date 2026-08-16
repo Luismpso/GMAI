@@ -54,20 +54,22 @@ Target is 90% on KQ vs K. Not there yet.
 ### ⚠️ Open problem: RL does not preserve the warm start
 
 Running RL on top of the warm start drives the win-rate **down**, from 0.52 to
-0.04. Instrumenting the first thousand gradient steps shows the policy dying
-between step 30 and step 300:
+0.04. The boundary is unambiguous — with a large `learn_start` the buffer does
+not fill until episode 5780, so the policy is visibly flat until the first
+gradient step and gone within 600 episodes of it:
 
-| gradient steps | Q scale | win-rate |
-|---|---|---|
-| 0 | 6.41 | 0.212 |
-| 30 | 4.89 | 0.275 |
-| 300 | 2.75 | 0.062 |
+```
+ep 5000 | win-rate 0.560     <- no training yet, buffer still filling
+ep 5800 | win-rate 0.415     <- TD learning starts at ~5780
+ep 6400 | win-rate 0.020
+```
 
-Three contributing causes are identified and measured — a scale mismatch
-between cross-entropy logits and the return range, an un-penalised stalling
-exit, and replay overfitting on a small buffer. Two are fixed; the collapse is
-not yet closed. Five approaches were tried and are tabulated with their
-results, including the negative ones, in
+The root cause is a scale mismatch: cross-entropy fixes the *ranking* of moves
+and says nothing about their *magnitude*, so a warm-started network is a good
+policy carrying unusable Q-values. Two ways of recovering the scale were tried
+and both failed for the same reason. Replay overfitting was investigated and
+ruled out; an un-penalised stalling exit was found and fixed. Every approach,
+including the negative results, is tabulated in
 **[`docs/POSTMORTEM.md`](docs/POSTMORTEM.md)**.
 
 ---
