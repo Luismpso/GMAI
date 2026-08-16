@@ -31,7 +31,8 @@ model:
   hidden: 512
 
 replay:
-  capacity: 100000
+  capacity: 60000        # ~0.6 GB with bit-packed masks. Raise only if you have
+                         # the RAM: run scripts/doctor.py to see the projection.
   prioritized: true
   alpha: 0.6
   beta: 0.4

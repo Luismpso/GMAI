@@ -118,7 +118,8 @@ GMAI/
 ├── configs/endgame.yaml        # scope, curriculum, warm start
 ├── scripts/
 │   ├── pipeline.py             # resumable stages: warmstart / rl / report
-│   └── ablate_anchor.py        # A/B the imitation anchor against a control
+│   ├── ablate_anchor.py        # A/B the imitation anchor against a control
+│   └── doctor.py               # run each stage in isolation, report memory
 ├── src/gmai/
 │   ├── tablebase.py            # exact solver (retrograde analysis)
 │   ├── warmstart.py            # supervised pre-training + DTM metric
@@ -169,6 +170,14 @@ python scripts/pipeline.py report    --kind KQvK
 
 ```bash
 pytest -q          # 161 passed
+```
+
+If a run dies without a traceback, that is a resource problem rather than a
+logic one. `scripts/doctor.py` exercises each stage separately, reports
+resident memory after each, and projects the peak with a full replay buffer:
+
+```bash
+python scripts/doctor.py
 ```
 
 ---

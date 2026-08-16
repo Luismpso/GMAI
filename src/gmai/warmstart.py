@@ -65,6 +65,7 @@ def build_dataset(
     n_positions: int,
     seed: int = 0,
     max_dtm: int | None = None,
+    verbose: bool = True,
 ) -> WarmStartData:
     """Sample won positions and label them with an optimal move.
 
@@ -75,8 +76,12 @@ def build_dataset(
     states, masks, targets = [], [], []
 
     attempts = 0
+    next_report = max(1, n_positions // 10)
     while len(states) < n_positions and attempts < n_positions * 50:
         attempts += 1
+        if verbose and len(states) >= next_report:
+            print(f"    {len(states):>6}/{n_positions} positions", flush=True)
+            next_report += max(1, n_positions // 10)
         position = sample_endgame(kind, rng=rng)
         board, strong = position.board, position.strong_color
         if board.turn != strong:
@@ -95,6 +100,13 @@ def build_dataset(
         masks.append(legal_action_mask(board))
         targets.append(move_to_action(rng.choice(best), board))
 
+    if not states:
+        raise RuntimeError(
+            f"no usable {kind} positions found after {attempts} attempts — "
+            "is the tablebase for this endgame built?"
+        )
+    if verbose:
+        print(f"    {len(states)}/{n_positions} positions, stacking...", flush=True)
     return WarmStartData(
         states=np.stack(states),
         masks=np.stack(masks),

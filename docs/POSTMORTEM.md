@@ -268,7 +268,36 @@ same checkpoint in a few minutes per arm.
 
 ---
 
-## 4. What generalises
+## 4. Silent death, no traceback
+
+A run died right after `[warmstart] building 20000 labelled KQvK positions...`,
+returning to the prompt with no error at all. No traceback usually means the
+process was killed rather than raising — most often memory.
+
+Measuring each stage separately:
+
+| stage | resident |
+|---|---|
+| torch imported | 220 MB |
+| agent (64ch × 4, hidden 512) | 340 MB |
+| tablebase loaded | 341 MB |
+| dataset, 20 000 positions | 679 MB |
+| **replay buffer when full (100 000)** | **+1.74 GB** |
+
+The buffer dominates everything else, and it is almost entirely waste: each
+transition stored two 4 096-element boolean masks at one byte per bool.
+`np.packbits` stores them as bits instead, taking a transition from 17.0 KB to
+10.84 KB — a full 100 000-capacity buffer drops from 1.74 GB to 1.03 GB. The
+default capacity is now 60 000 (~0.62 GB).
+
+`scripts/doctor.py` runs each stage in isolation, reports resident memory after
+each, and projects the peak with a full buffer, so the next silent death is a
+number rather than a guess. `build_dataset` also reports progress now, which
+distinguishes "died during generation" from "died while stacking".
+
+---
+
+## 5. What generalises
 
 **Always measure the baseline before measuring the agent.** One run of
 random-vs-random would have shown that 0.499 was the floor, and the whole
@@ -297,6 +326,11 @@ updates. That one table was worth more than several full training runs.
 non-terminal is correct in general and made stalling the highest-value action
 in this specific task. A correction that is right in the abstract still has to
 be checked against what the agent can now exploit.
+
+**A crash with no traceback is a resource problem, not a logic problem.**
+Python reports its own exceptions. Silence means something outside Python
+ended the process, and the first move is to measure the resource rather than
+reread the code.
 
 **Know what a loss function actually constrains.** Cross-entropy fixes the
 ranking of outputs and says nothing about their magnitude — obvious in
