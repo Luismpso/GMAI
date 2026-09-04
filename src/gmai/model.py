@@ -62,9 +62,7 @@ class DuelingChessNet(nn.Module):
             nn.Linear(hidden, N_ACTIONS),
         )
 
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """Q-values. ``mask`` (B, 4096) restricts the advantage mean to legal moves.
 
         Passing ``mask=None`` falls back to the mean over all 4096 actions,
@@ -73,8 +71,8 @@ class DuelingChessNet(nn.Module):
         the module stays usable in isolation (e.g. shape tests).
         """
         z = self.trunk(x)
-        value = self.value_head(z)            # (B, 1)
-        advantage = self.advantage_head(z)    # (B, 4096)
+        value = self.value_head(z)  # (B, 1)
+        advantage = self.advantage_head(z)  # (B, 4096)
 
         if mask is None:
             baseline = advantage.mean(dim=1, keepdim=True)

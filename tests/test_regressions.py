@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from gmai.agent import DQNAgent
-from gmai.encoding import N_ACTIONS, legal_action_mask, move_to_action
+from gmai.encoding import N_ACTIONS
 from gmai.endgames import make_sampler
 from gmai.environment import ChessEnv
 from gmai.model import DuelingChessNet
@@ -65,8 +65,9 @@ class TestNoBatchNorm:
 
     def test_no_batchnorm_modules(self):
         net = DuelingChessNet(channels=32, n_blocks=3, hidden=64)
-        assert not any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
-                       for m in net.modules())
+        assert not any(
+            isinstance(m, torch.nn.modules.batchnorm._BatchNorm) for m in net.modules()
+        )
         assert any(isinstance(m, torch.nn.GroupNorm) for m in net.modules())
 
     def test_train_and_eval_modes_agree(self):
@@ -94,8 +95,9 @@ class TestTruncationIsNotTerminal:
 
     def _agent(self):
         torch.manual_seed(0)
-        return DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=0,
-                        gamma=0.9)
+        return DQNAgent(
+            channels=8, n_blocks=2, hidden=32, device="cpu", seed=0, gamma=0.9
+        )
 
     def _batch(self, terminated: float, reward: float = 0.0):
         rng = np.random.default_rng(0)
@@ -166,7 +168,10 @@ class TestShapingIsPolicyInvariant:
         total = sum(
             (gamma**t)
             * shaping_reward(
-                boards[t], boards[t + 1], chess.WHITE, gamma,
+                boards[t],
+                boards[t + 1],
+                chess.WHITE,
+                gamma,
                 potential_fn=endgame_potential,
                 after_is_terminal=(t == T - 1),
             )
@@ -186,8 +191,13 @@ class TestShapingIsPolicyInvariant:
         T = len(boards) - 1
         broken = sum(
             (gamma**t)
-            * shaping_reward(boards[t], boards[t + 1], chess.WHITE, gamma,
-                             potential_fn=endgame_potential)
+            * shaping_reward(
+                boards[t],
+                boards[t + 1],
+                chess.WHITE,
+                gamma,
+                potential_fn=endgame_potential,
+            )
             for t in range(T - 1)  # last term dropped, as before
         )
         assert broken != pytest.approx(
@@ -201,12 +211,20 @@ class TestShapingIsPolicyInvariant:
         after = chess.Board("4k3/8/8/8/8/Q7/8/4K3 b - - 1 1")
 
         truncated_term = shaping_reward(
-            before, after, chess.WHITE, 0.99,
-            potential_fn=material_potential, after_is_terminal=False,
+            before,
+            after,
+            chess.WHITE,
+            0.99,
+            potential_fn=material_potential,
+            after_is_terminal=False,
         )
         terminal_term = shaping_reward(
-            before, after, chess.WHITE, 0.99,
-            potential_fn=material_potential, after_is_terminal=True,
+            before,
+            after,
+            chess.WHITE,
+            0.99,
+            potential_fn=material_potential,
+            after_is_terminal=True,
         )
         assert material_potential(after, chess.WHITE) > 0
         assert truncated_term != terminal_term
@@ -235,6 +253,4 @@ class TestEndgamePotential:
     def test_closer_own_king_scores_higher(self):
         far = chess.Board("k7/8/8/8/8/8/Q7/7K w - - 0 1")
         near = chess.Board("k7/8/1K6/8/8/8/Q7/8 w - - 0 1")
-        assert endgame_potential(near, chess.WHITE) > endgame_potential(
-            far, chess.WHITE
-        )
+        assert endgame_potential(near, chess.WHITE) > endgame_potential(far, chess.WHITE)

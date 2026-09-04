@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 
 import chess
 
-from .rewards import PIECE_VALUES, material_balance
+from .rewards import material_balance
 
 
 class Opponent(ABC):

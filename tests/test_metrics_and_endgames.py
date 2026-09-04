@@ -115,9 +115,10 @@ class TestEndgameSampler:
         rng = random.Random(2)
         for _ in range(150):
             board = sample_endgame("KQvK", rng=rng).board
-            assert chess.square_distance(
-                board.king(chess.WHITE), board.king(chess.BLACK)
-            ) > 1
+            assert (
+                chess.square_distance(board.king(chess.WHITE), board.king(chess.BLACK))
+                > 1
+            )
 
     def test_weak_side_has_only_a_king(self):
         import random

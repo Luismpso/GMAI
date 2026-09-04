@@ -24,7 +24,6 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
-import chess
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -33,7 +32,6 @@ from .agent import DQNAgent
 from .encoding import N_ACTIONS, encode_board, legal_action_mask, move_to_action
 from .endgames import sample_endgame
 from .tablebase import DRAW, EndgameTable
-
 
 MAX_LEGAL = 48  # upper bound on legal moves in a 3-4 piece endgame
 
@@ -46,10 +44,10 @@ class QWarmStartData:
     :data:`MAX_LEGAL` per position rather than materialising 4096 columns.
     """
 
-    states: np.ndarray    # (N, 18, 8, 8) float32
-    actions: np.ndarray   # (N, MAX_LEGAL) int64, -1 padding
-    targets: np.ndarray   # (N, MAX_LEGAL) float32
-    valid: np.ndarray     # (N, MAX_LEGAL) bool
+    states: np.ndarray  # (N, 18, 8, 8) float32
+    actions: np.ndarray  # (N, MAX_LEGAL) int64, -1 padding
+    targets: np.ndarray  # (N, MAX_LEGAL) float32
+    valid: np.ndarray  # (N, MAX_LEGAL) bool
 
 
 @dataclass
@@ -64,9 +62,9 @@ class WarmStartData:
     traceback.
     """
 
-    states: np.ndarray        # (N, 18, 8, 8) float32
+    states: np.ndarray  # (N, 18, 8, 8) float32
     masks_packed: np.ndarray  # (N, 512)      uint8
-    targets: np.ndarray       # (N,)          int64
+    targets: np.ndarray  # (N,)          int64
 
     def __len__(self) -> int:
         return len(self.targets)
@@ -218,9 +216,7 @@ def build_q_dataset(
             board.pop()
 
             acts.append(move_to_action(move, board))
-            tgts.append(
-                optimal_q_value(dtm_after, phi, gamma, draw_reward, mate)
-            )
+            tgts.append(optimal_q_value(dtm_after, phi, gamma, draw_reward, mate))
             if len(acts) == MAX_LEGAL:
                 break
 
@@ -319,8 +315,9 @@ def pretrain_q(
                 pred = q.masked_fill(~v, -1e9).argmax(dim=1)
                 best = y.masked_fill(~v, -1e9).argmax(dim=1)
                 top1 += int(
-                    (y.gather(1, pred.unsqueeze(1))
-                     == y.gather(1, best.unsqueeze(1))).sum().item()
+                    (y.gather(1, pred.unsqueeze(1)) == y.gather(1, best.unsqueeze(1)))
+                    .sum()
+                    .item()
                 )
 
         mean_loss = sum(losses) / len(losses)
@@ -417,7 +414,7 @@ class ImitationAnchor:
     def __init__(
         self,
         agent: DQNAgent,
-        data: "WarmStartData",
+        data: WarmStartData,
         lr: float = 1e-5,
         batch_size: int = 128,
         every: int = 1,
@@ -609,7 +606,7 @@ def dtm_quality(
         "optimal_rate": round(optimal / total, 4),
         "suboptimal_rate": round(suboptimal / total, 4),
         "throw_away_rate": round(throw_away / total, 4),
-        "mean_plies_lost": round(
-            sum(mean_loss_plies) / len(mean_loss_plies), 2
-        ) if mean_loss_plies else 0.0,
+        "mean_plies_lost": round(sum(mean_loss_plies) / len(mean_loss_plies), 2)
+        if mean_loss_plies
+        else 0.0,
     }

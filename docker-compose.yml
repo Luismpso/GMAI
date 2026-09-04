@@ -1,0 +1,63 @@
+# Local stack: the inference service plus the observability it emits into.
+#
+#   docker compose up --build
+#   curl -X POST localhost:8000/move -H 'Content-Type: application/json' \
+#        -d '{"fen":"4k3/8/8/8/8/8/Q7/4K3 w - - 0 1"}'
+#
+# Grafana: http://localhost:3000 (anonymous viewer, no login)
+# Prometheus: http://localhost:9090
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gmai-api:local
+    ports:
+      - "8000:8000"
+    environment:
+      GMAI_CHECKPOINT: /app/models/final.pt
+      GMAI_DEVICE: cpu
+    volumes:
+      # Swap in a different checkpoint without rebuilding.
+      - ./models:/app/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:

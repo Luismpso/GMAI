@@ -84,9 +84,9 @@ class TestReplayBuffer:
         batch = buf.sample(16)
         assert batch.states.shape == (16, N_PLANES, 8, 8)
         assert batch.actions.shape == (16,)
-        assert batch.masks.shape == (16, N_ACTIONS)       # current-state mask
+        assert batch.masks.shape == (16, N_ACTIONS)  # current-state mask
         assert batch.next_masks.shape == (16, N_ACTIONS)
-        assert batch.terminated.shape == (16,)            # not `dones`
+        assert batch.terminated.shape == (16,)  # not `dones`
         assert batch.actions.dtype == np.int64
 
 
@@ -107,9 +107,7 @@ class TestSumTree:
         tree = SumTree(capacity=2)
         tree.add(1.0)
         tree.add(99.0)
-        hits = sum(
-            tree.get(v)[1] > 50 for v in np.linspace(0.5, tree.total - 0.5, 100)
-        )
+        hits = sum(tree.get(v)[1] > 50 for v in np.linspace(0.5, tree.total - 0.5, 100))
         assert hits > 90  # ~99% of mass in the second leaf
 
 

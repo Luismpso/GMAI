@@ -29,7 +29,6 @@ import chess
 
 from .agent import DQNAgent
 from .encoding import action_to_move
-from .model import masked_q_values
 
 ENGINE_NAME = "GMAI (Grand Master AI)"
 ENGINE_AUTHOR = "Luis Miguel Pereira Silva"
@@ -95,11 +94,7 @@ def uci_loop(agent: DQNAgent) -> None:
         elif cmd == "position":
             board = _parse_position(board, tokens[1:])
 
-        elif cmd == "go":
-            move = _best_move(agent, board)
-            _send(f"bestmove {move.uci() if move else '0000'}")
-
-        elif cmd == "stop":
+        elif cmd == "go" or cmd == "stop":
             move = _best_move(agent, board)
             _send(f"bestmove {move.uci() if move else '0000'}")
 

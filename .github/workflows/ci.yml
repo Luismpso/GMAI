@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install ruff==0.6.9
+      - name: ruff check
+        run: ruff check src tests scripts
+      - name: ruff format --check
+        run: ruff format --check src tests scripts
+
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install (CPU torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,api]"
+          pip install pytest-cov
+
+      # Retrograde analysis takes ~85 s per endgame. Cache it on the config
+      # and solver source so it is only recomputed when either changes.
+      - name: Cache solved endgames
+        id: tablebase-cache
+        uses: actions/cache@v4
+        with:
+          path: tablebases
+          key: tb-${{ hashFiles('src/gmai/tablebase.py') }}
+
+      - name: Solve endgames
+        if: steps.tablebase-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m gmai.tablebase --kind KQvK
+          python -m gmai.tablebase --kind KRvK
+
+      - name: pytest
+        run: |
+          pytest -q --cov=gmai --cov-report=term-missing \
+                    --cov-report=xml --cov-fail-under=70
+
+      - name: Upload coverage
+        if: matrix.python == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+      # Unit tests catch code that throws; this catches code that runs fine
+      # and plays worse. That is the failure mode this project actually had.
+      - name: Performance regression gate
+        if: matrix.python == '3.11'
+        run: python scripts/regression_check.py --checkpoint models/final.pt --games 100
+
+  types:
+    name: types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev,api]" mypy==1.11.2
+      # Not yet clean across the whole package; this gates the modules that are.
+      - run: mypy src/gmai/metrics.py src/gmai/endgames.py src/gmai/rewards.py
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build inference image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: gmai-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report image size
+        run: docker image ls gmai-api:ci --format '{{.Size}}'
+
+      # A container that builds but will not answer is not a passing build.
+      - name: Smoke test the container
+        run: |
+          docker run -d --name gmai -p 8000:8000 gmai-api:ci
+          for i in $(seq 1 30); do
+            if curl -fs localhost:8000/health > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fs localhost:8000/health | tee /dev/stderr | grep -q '"status"'
+          curl -fs -X POST localhost:8000/move \
+            -H 'Content-Type: application/json' \
+            -d '{"fen":"4k3/8/8/8/8/8/Q7/4K3 w - - 0 1"}' \
+            | tee /dev/stderr | grep -q '"uci"'
+          curl -fs localhost:8000/metrics | grep -q gmai_move_requests_total
+          docker rm -f gmai

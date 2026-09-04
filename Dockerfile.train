@@ -1,0 +1,27 @@
+# Training image: CUDA, the full dependency set, and the solver cache.
+#
+# Kept separate from the inference image on purpose. Training needs a GPU, the
+# gymnasium environment and the plotting stack; serving needs none of it, and
+# folding them together would triple the size of the thing that gets deployed.
+
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-cache-dir -e ".[dev]"
+
+COPY configs ./configs
+COPY scripts ./scripts
+
+# Solve the endgames once at build time so containers start training
+# immediately instead of spending ~85 s each on retrograde analysis.
+RUN python -m gmai.tablebase --kind KQvK && \
+    python -m gmai.tablebase --kind KRvK
+
+VOLUME ["/app/runs"]
+CMD ["python", "-m", "gmai.train", "--config", "configs/endgame.yaml"]

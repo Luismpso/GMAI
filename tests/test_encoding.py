@@ -29,11 +29,11 @@ class TestEncodeBoard:
 
     def test_start_position_piece_counts(self, start_board):
         planes = encode_board(start_board)
-        assert planes[0].sum() == 8   # own pawns
-        assert planes[6].sum() == 8   # opponent pawns
+        assert planes[0].sum() == 8  # own pawns
+        assert planes[6].sum() == 8  # opponent pawns
         for idx in (1, 2, 3, 7, 8, 9):  # knights, bishops, rooks
             assert planes[idx].sum() == 2
-        for idx in (4, 5, 10, 11):      # queens, kings
+        for idx in (4, 5, 10, 11):  # queens, kings
             assert planes[idx].sum() == 1
 
     def test_own_pawns_on_second_rank_from_pov(self, start_board):

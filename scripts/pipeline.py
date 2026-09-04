@@ -19,7 +19,6 @@ import time
 from pathlib import Path
 
 import torch
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -97,8 +96,15 @@ def phase_rl(kind, episodes, epsilon):
         while not (terminated or truncated):
             action = agent.act(env.board)
             next_state, reward, terminated, truncated, info = env.step(action)
-            buffer.push(state, mask, action, reward,
-                        next_state, info["action_mask"], float(terminated))
+            buffer.push(
+                state,
+                mask,
+                action,
+                reward,
+                next_state,
+                info["action_mask"],
+                float(terminated),
+            )
             state, mask = next_state, info["action_mask"]
             env_steps += 1
             agent.decay_epsilon()

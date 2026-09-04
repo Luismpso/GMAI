@@ -1,0 +1,33 @@
+# Training artifacts: checkpoints are mounted or baked in explicitly
+runs/
+*.pt
+*.pth
+
+# Solver cache: rebuilt inside the training image, unused by inference
+tablebases/
+
+# Development
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Not needed at runtime
+notebooks/
+docs/
+tests/
+assets/
+*.md
+!README.md
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

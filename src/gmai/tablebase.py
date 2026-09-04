@@ -134,7 +134,7 @@ class EndgameTable:
         np.savez_compressed(path, kind=self.kind, dtm=self.dtm)
 
     @classmethod
-    def load(cls, path: str | Path) -> "EndgameTable":
+    def load(cls, path: str | Path) -> EndgameTable:
         data = np.load(path)
         return cls(str(data["kind"]), data["dtm"])
 
@@ -187,8 +187,8 @@ def _build_state_graph(piece_type: int):
                     out_degree[i] = len(moves)
                     if not moves:
                         if board.is_check():
-                            is_mate[i] = True   # weak side mated
-                        continue                # stalemate: stays DRAW
+                            is_mate[i] = True  # weak side mated
+                        continue  # stalemate: stays DRAW
 
                     for move in moves:
                         board.push(move)
@@ -197,7 +197,8 @@ def _build_state_graph(piece_type: int):
                             nwk = board.king(chess.WHITE)
                             nbk = board.king(chess.BLACK)
                             npc = next(
-                                sq for sq, p in pieces.items()
+                                sq
+                                for sq, p in pieces.items()
                                 if p.piece_type != chess.KING
                             )
                             successors[i].append(

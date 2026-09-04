@@ -1,0 +1,13 @@
+{
+  "kind": "KQvK",
+  "games": 100,
+  "seed": 1234,
+  "metrics": {
+    "win_rate": 0.61,
+    "draw_rate": 0.39,
+    "loss_rate": 0.0,
+    "mean_plies": 18.69,
+    "optimal_rate": 0.6467,
+    "throw_away_rate": 0.06
+  }
+}

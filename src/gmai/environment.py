@@ -15,7 +15,8 @@ as such. Pass ``position_sampler=None`` to get standard chess back.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import chess
 import gymnasium as gym
@@ -102,9 +103,7 @@ class ChessEnv(gym.Env):
             self.position_kind = "startpos"
             self.max_moves = self.default_max_moves
             if self._fixed_color is None:
-                self.agent_color = (
-                    chess.WHITE if self._episode % 2 == 0 else chess.BLACK
-                )
+                self.agent_color = chess.WHITE if self._episode % 2 == 0 else chess.BLACK
             else:
                 self.agent_color = self._fixed_color
 

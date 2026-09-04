@@ -34,9 +34,9 @@ class TestRewards:
     @pytest.mark.parametrize(
         "fen,white_balance",
         [
-            ("k7/8/8/8/8/8/8/KQ6 w - - 0 1", 9.0),    # extra queen
-            ("k7/8/8/8/8/8/8/KR6 w - - 0 1", 5.0),    # extra rook
-            ("kn6/8/8/8/8/8/8/KB6 w - - 0 1", 0.0),   # bishop vs knight
+            ("k7/8/8/8/8/8/8/KQ6 w - - 0 1", 9.0),  # extra queen
+            ("k7/8/8/8/8/8/8/KR6 w - - 0 1", 5.0),  # extra rook
+            ("kn6/8/8/8/8/8/8/KB6 w - - 0 1", 0.0),  # bishop vs knight
             ("kq6/8/8/8/8/8/8/KR6 w - - 0 1", -4.0),  # rook vs queen
         ],
     )
@@ -59,12 +59,11 @@ class TestRewards:
             boards.append(board.copy())
 
         total = sum(
-            (gamma ** t)
-            * shaping_reward(boards[t], boards[t + 1], chess.WHITE, gamma)
+            (gamma**t) * shaping_reward(boards[t], boards[t + 1], chess.WHITE, gamma)
             for t in range(len(boards) - 1)
         )
         T = len(boards) - 1
-        expected = (gamma ** T) * potential(boards[-1], chess.WHITE) - potential(
+        expected = (gamma**T) * potential(boards[-1], chess.WHITE) - potential(
             boards[0], chess.WHITE
         )
         assert total == pytest.approx(expected, abs=1e-9)
@@ -144,9 +143,14 @@ class TestAgent:
 
     def test_epsilon_decays_to_floor(self):
         agent = DQNAgent(
-            channels=8, n_blocks=2, hidden=32,
-            epsilon_start=1.0, epsilon_end=0.1, epsilon_decay_steps=10,
-            device="cpu", seed=0,
+            channels=8,
+            n_blocks=2,
+            hidden=32,
+            epsilon_start=1.0,
+            epsilon_end=0.1,
+            epsilon_decay_steps=10,
+            device="cpu",
+            seed=0,
         )
         for _ in range(50):
             agent.decay_epsilon()
@@ -162,8 +166,7 @@ class TestAgent:
         mask = legal_action_mask(board)
         for _ in range(n):
             action = int(rng.choice(np.flatnonzero(mask)))
-            buf.push(state, mask, action, float(rng.normal()),
-                     state, mask, 0.0)
+            buf.push(state, mask, action, float(rng.normal()), state, mask, 0.0)
         return buf
 
     def test_train_step_returns_finite_loss(self, tiny_agent):
@@ -178,7 +181,7 @@ class TestAgent:
                 p.add_(1.0)
         tiny_agent.sync_target()
         for po, pt in zip(
-            tiny_agent.online.parameters(), tiny_agent.target.parameters()
+            tiny_agent.online.parameters(), tiny_agent.target.parameters(), strict=True
         ):
             assert torch.equal(po, pt)
 
@@ -188,7 +191,7 @@ class TestAgent:
         fresh = DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=1)
         fresh.load(path)
         for po, pf in zip(
-            tiny_agent.online.parameters(), fresh.online.parameters()
+            tiny_agent.online.parameters(), fresh.online.parameters(), strict=True
         ):
             assert torch.equal(po, pf)
 
@@ -207,7 +210,7 @@ class TestAgent:
         restored = DQNAgent.from_checkpoint(path, device="cpu")
         assert restored.arch == tiny_agent.arch
         for po, pr in zip(
-            tiny_agent.online.parameters(), restored.online.parameters()
+            tiny_agent.online.parameters(), restored.online.parameters(), strict=True
         ):
             assert torch.equal(po, pr)
 

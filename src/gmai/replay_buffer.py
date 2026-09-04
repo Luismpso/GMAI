@@ -34,13 +34,13 @@ import numpy as np
 
 @dataclass
 class Batch:
-    states: np.ndarray        # (B, 18, 8, 8) float32
-    masks: np.ndarray         # (B, 4096)     bool   - legal moves in s
-    actions: np.ndarray       # (B,)          int64
-    rewards: np.ndarray       # (B,)          float32
-    next_states: np.ndarray   # (B, 18, 8, 8) float32
-    next_masks: np.ndarray    # (B, 4096)     bool   - legal moves in s'
-    terminated: np.ndarray    # (B,)          float32 - TRUE terminal only
+    states: np.ndarray  # (B, 18, 8, 8) float32
+    masks: np.ndarray  # (B, 4096)     bool   - legal moves in s
+    actions: np.ndarray  # (B,)          int64
+    rewards: np.ndarray  # (B,)          float32
+    next_states: np.ndarray  # (B, 18, 8, 8) float32
+    next_masks: np.ndarray  # (B, 4096)     bool   - legal moves in s'
+    terminated: np.ndarray  # (B,)          float32 - TRUE terminal only
     weights: np.ndarray = field(default=None)  # PER IS weights
     indices: np.ndarray = field(default=None)  # PER tree indices
 
@@ -80,7 +80,8 @@ class ReplayBuffer:
         return np.unpackbits(np.stack(packed), axis=1).astype(bool)
 
     def _collate(self, items: list[tuple]) -> Batch:
-        s, m, a, r, ns, nm, term = zip(*items)
+        # strict=True: every stored item is a 7-tuple by construction.
+        s, m, a, r, ns, nm, term = zip(*items, strict=True)
         return Batch(
             states=np.stack(s),
             masks=self._unpack(m),
@@ -184,7 +185,7 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         return batch
 
     def update_priorities(self, leaves: np.ndarray, td_errors: np.ndarray) -> None:
-        for leaf, delta in zip(leaves, np.abs(td_errors)):
+        for leaf, delta in zip(leaves, np.abs(td_errors), strict=True):
             priority = float((delta + self.eps) ** self.alpha)
             self._tree.update(int(leaf), priority)
             self._max_priority = max(self._max_priority, delta + self.eps)

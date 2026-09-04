@@ -1,8 +1,12 @@
-# Post-mortem: how one metric hid four bugs
+# Post-mortem
 
-For roughly 2 100 episodes, GMAI trained on full chess and reported a win-rate
-hovering around 0.55. It looked like slow learning. It was not learning at all
-— and the reason it took so long to notice is worth writing down.
+For roughly 2 100 episodes, GMAI trained on full chess and reported a win rate
+of approximately 0.55. This appeared to be slow learning. It was not learning
+at all, and the reason it went unnoticed for so long is the substance of this
+document.
+
+Five defects prevented learning entirely. A single badly chosen metric
+concealed four of them. Each defect now has a regression test.
 
 ---
 

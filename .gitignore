@@ -16,6 +16,10 @@ runs/
 *.pt
 *.pth
 
+# ...except the published checkpoint, which the inference image copies in and
+# the CI smoke test needs. Keep it small; large checkpoints belong in Releases.
+!models/*.pt
+
 # Tooling
 .pytest_cache/
 .mypy_cache/

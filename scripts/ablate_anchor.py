@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -67,7 +66,10 @@ def main():
         anchor = ImitationAnchor(
             agent,
             WarmStartData(blob["states"], blob["masks"], blob["targets"]),
-            lr=1e-5, batch_size=128, every=1, seed=0,
+            lr=1e-5,
+            batch_size=128,
+            every=1,
+            seed=0,
         )
 
     env = ChessEnv(
@@ -95,8 +97,15 @@ def main():
         while not (terminated or truncated):
             action = agent.act(env.board)
             next_state, reward, terminated, truncated, info = env.step(action)
-            buffer.push(state, mask, action, reward,
-                        next_state, info["action_mask"], float(terminated))
+            buffer.push(
+                state,
+                mask,
+                action,
+                reward,
+                next_state,
+                info["action_mask"],
+                float(terminated),
+            )
             state, mask = next_state, info["action_mask"]
             steps += 1
             agent.decay_epsilon()
@@ -109,8 +118,7 @@ def main():
         if ep % 200 == 0:
             stats = greedy_win_rate(agent)
             curve.append({"episode": ep, **stats.as_dict()})
-            print(f"[{tag}] ep {ep} ({time.time()-t0:.0f}s): "
-                  f"{stats.summary_line()}")
+            print(f"[{tag}] ep {ep} ({time.time() - t0:.0f}s): {stats.summary_line()}")
 
     name = f"anchor_{args.anchor}_limit_{args.limit_terminal}"
     agent.save(OUT / f"{name}.pt")

@@ -25,16 +25,10 @@ import json
 import time
 from pathlib import Path
 
-# A native crash (bad CUDA kernel, MKL fault, stack overflow) kills the process
-# without a Python traceback, which looks identical to a clean exit. This makes
-# the interpreter dump C and Python stacks on the way out instead.
-faulthandler.enable()
-
-import chess
 import yaml
 
 from .agent import DQNAgent
-from .endgames import ENDGAME_ORDER, make_sampler
+from .endgames import make_sampler
 from .environment import ChessEnv
 from .metrics import RollingStats, classify_episode
 from .opponents import RandomOpponent
@@ -42,6 +36,11 @@ from .replay_buffer import PrioritizedReplayBuffer, ReplayBuffer
 from .rewards import POTENTIALS
 from .tablebase import SOLVABLE, get_table
 from .warmstart import build_dataset, dtm_quality, pretrain
+
+# A native crash (bad CUDA kernel, MKL fault, stack overflow) kills the process
+# without a Python traceback, which looks identical to a clean exit. This makes
+# the interpreter dump C and Python stacks on the way out instead.
+faulthandler.enable()
 
 
 def load_config(path: str | Path) -> dict:
@@ -110,8 +109,11 @@ def run_warmstart(agent: DQNAgent, cfg: dict, kind: str) -> dict | None:
     print(f"[warmstart] building {wcfg['positions']} labelled {kind} positions...")
     data = build_dataset(kind, table, wcfg["positions"], seed=cfg["seed"])
     pretrain(
-        agent, data,
-        epochs=wcfg["epochs"], batch_size=wcfg["batch_size"], lr=wcfg["lr"],
+        agent,
+        data,
+        epochs=wcfg["epochs"],
+        batch_size=wcfg["batch_size"],
+        lr=wcfg["lr"],
     )
     quality = dtm_quality(agent, kind, table, n_positions=200, seed=cfg["seed"])
     print(f"[warmstart] DTM quality after pre-training: {quality}")
@@ -155,9 +157,19 @@ def train(cfg: dict) -> Path:
         writer = csv.writer(f)
         writer.writerow(
             [
-                "episode", "stage", "reward", "win", "draw", "loss",
-                "plies", "termination", "epsilon", "loss_td",
-                "roll_win_rate", "roll_draw_rate", "roll_conv_fail",
+                "episode",
+                "stage",
+                "reward",
+                "win",
+                "draw",
+                "loss",
+                "plies",
+                "termination",
+                "epsilon",
+                "loss_td",
+                "roll_win_rate",
+                "roll_draw_rate",
+                "roll_conv_fail",
             ]
         )
 
@@ -174,8 +186,13 @@ def train(cfg: dict) -> Path:
 
                 # store `terminated`, not `terminated or truncated`
                 buffer.push(
-                    state, mask, action, reward,
-                    next_state, next_mask, float(terminated),
+                    state,
+                    mask,
+                    action,
+                    reward,
+                    next_state,
+                    next_mask,
+                    float(terminated),
                 )
                 state, mask = next_state, next_mask
                 episode_reward += reward
@@ -196,14 +213,23 @@ def train(cfg: dict) -> Path:
             result = classify_episode(env.board, env.agent_color, truncated)
             stats.add(result)
 
-            writer.writerow([
-                episode, stages[stage], round(episode_reward, 4),
-                int(result.win), int(result.draw), int(result.loss),
-                result.plies, result.termination, round(agent.epsilon, 4),
-                round(sum(losses) / len(losses), 5) if losses else "",
-                round(stats.win_rate, 4), round(stats.draw_rate, 4),
-                round(stats.conversion_failure_rate, 4),
-            ])
+            writer.writerow(
+                [
+                    episode,
+                    stages[stage],
+                    round(episode_reward, 4),
+                    int(result.win),
+                    int(result.draw),
+                    int(result.loss),
+                    result.plies,
+                    result.termination,
+                    round(agent.epsilon, 4),
+                    round(sum(losses) / len(losses), 5) if losses else "",
+                    round(stats.win_rate, 4),
+                    round(stats.draw_rate, 4),
+                    round(stats.conversion_failure_rate, 4),
+                ]
+            )
 
             if episode % cfg["log_every"] == 0:
                 print(
@@ -218,7 +244,9 @@ def train(cfg: dict) -> Path:
                 and stats.win_rate >= cfg["curriculum"]["screen_at"]
             )
             if gate_due:
-                ev = greedy_eval(agent, cfg, stages[stage], cfg["curriculum"]["eval_games"])
+                ev = greedy_eval(
+                    agent, cfg, stages[stage], cfg["curriculum"]["eval_games"]
+                )
                 record = {"episode": episode, "stage": stages[stage], **ev.as_dict()}
                 history.append(record)
                 print(f"  [eval] {stages[stage]} greedy -> {ev.summary_line()}")

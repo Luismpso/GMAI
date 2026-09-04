@@ -112,14 +112,17 @@ def main() -> int:
         if total != total:  # NaN: psutil unavailable
             print("  (install psutil for a RAM headroom check)")
         elif peak_gb > total * 0.8:
-            print("  !! close to this machine's RAM — lower replay.capacity "
-                  "or warmstart.positions.")
+            print(
+                "  !! close to this machine's RAM — lower replay.capacity "
+                "or warmstart.positions."
+            )
         else:
             print(f"  that is {peak_gb / total:.0%} of {total:.0f} GB: comfortable.")
             print("  If a run still dies with no traceback, memory is NOT the")
             print("  cause. Re-run with faulthandler to catch a native crash:")
-            print("     python -X faulthandler -m gmai.train "
-                  "--config configs/endgame.yaml")
+            print(
+                "     python -X faulthandler -m gmai.train --config configs/endgame.yaml"
+            )
         return 0
 
     except MemoryError:

@@ -83,7 +83,7 @@ def sample_endgame(
         board = chess.Board(None)  # empty board
         board.set_piece_at(squares[0], chess.Piece(chess.KING, strong))
         board.set_piece_at(squares[1], chess.Piece(chess.KING, weak))
-        for piece_type, square in zip(pieces, squares[2:]):
+        for piece_type, square in zip(pieces, squares[2:], strict=True):
             board.set_piece_at(square, chess.Piece(piece_type, strong))
 
         board.turn = strong if to_move else weak
@@ -103,21 +103,22 @@ def sample_endgame(
 
         return EndgamePosition(board, kind, strong, max_moves)
 
-    raise RuntimeError(f"could not sample a valid {kind} position in {max_attempts} tries")
+    raise RuntimeError(
+        f"could not sample a valid {kind} position in {max_attempts} tries"
+    )
 
 
 def _weak_king_can_capture_everything(board: chess.Board, weak: chess.Color) -> bool:
     """True if the lone king can capture the strong side's last piece for free."""
     remaining = [
-        sq for sq, p in board.piece_map().items()
+        sq
+        for sq, p in board.piece_map().items()
         if p.color != weak and p.piece_type != chess.KING
     ]
     if len(remaining) != 1:
         return False
     target = remaining[0]
-    return any(
-        m.to_square == target for m in board.legal_moves
-    )
+    return any(m.to_square == target for m in board.legal_moves)
 
 
 def make_sampler(kind: str, seed: int | None = None, **kwargs):

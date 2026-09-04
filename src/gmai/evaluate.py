@@ -127,8 +127,10 @@ def run_report(agent: DQNAgent | None, games: int = 200, seed: int = 0) -> dict:
 
 
 def print_report(report: dict) -> None:
-    print(f"\n{'endgame':<8} {'defender':<10} {'who':<10} "
-          f"{'W':>4} {'D':>4} {'L':>4} {'win-rate':>9} {'plies':>7}")
+    print(
+        f"\n{'endgame':<8} {'defender':<10} {'who':<10} "
+        f"{'W':>4} {'D':>4} {'L':>4} {'win-rate':>9} {'plies':>7}"
+    )
     print("-" * 62)
     for kind, defenders in report.items():
         for defender, entries in defenders.items():

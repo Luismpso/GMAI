@@ -44,11 +44,13 @@ class TestIndexing:
             assert unindex(index(*parts)) == parts
 
     def test_indices_are_unique(self):
-        seen = {index(wk, bk, pc, t)
-                for wk in range(0, 64, 7)
-                for bk in range(0, 64, 5)
-                for pc in range(0, 64, 3)
-                for t in (0, 1)}
+        seen = {
+            index(wk, bk, pc, t)
+            for wk in range(0, 64, 7)
+            for bk in range(0, 64, 5)
+            for pc in range(0, 64, 3)
+            for t in (0, 1)
+        }
         expected = len(range(0, 64, 7)) * len(range(0, 64, 5)) * len(range(0, 64, 3)) * 2
         assert len(seen) == expected
 
@@ -186,7 +188,9 @@ class TestWarmStart:
         torch.manual_seed(0)
         agent = DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=0)
         pretrain(agent, data, epochs=1, batch_size=64, verbose=False)
-        for po, pt in zip(agent.online.parameters(), agent.target.parameters()):
+        for po, pt in zip(
+            agent.online.parameters(), agent.target.parameters(), strict=True
+        ):
             assert torch.equal(po, pt)
 
 

@@ -82,9 +82,7 @@ class TestUciLoop:
         board.push_san("e4")
         assert chess.Move.from_uci(uci) in board.legal_moves
 
-    def test_go_in_finished_game_returns_null_move(
-        self, tiny_agent, monkeypatch, capsys
-    ):
+    def test_go_in_finished_game_returns_null_move(self, tiny_agent, monkeypatch, capsys):
         mate = "position startpos moves f2f3 e7e5 g2g4 d8h4"
         out = self._run(tiny_agent, [mate, "go", "quit"], monkeypatch, capsys)
         assert "bestmove 0000" in out

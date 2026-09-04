@@ -1,18 +1,23 @@
-# 🌐 Playing online with GMAI
+# Playing online
 
-GMAI speaks **UCI**, the standard protocol every chess GUI and bot bridge understands. That means the same engine binary works locally (Arena, Cute Chess, En Croissant) and on Lichess.
-
----
-
-## ⚠️ chess.com: don't
-
-There is **no legitimate way** to run your own engine in your own chess.com games. Their fair-play policy prohibits engine assistance, and accounts caught doing it get closed. Their Computer Chess Championship exists, but it is invitation-only for established top engines.
-
-**Lichess is the right venue** — it has an official, supported Bot API, and bots are clearly labelled so opponents know what they are playing.
+GMAI implements UCI, so the same entry point works with any chess GUI (Arena,
+Cute Chess, En Croissant, BanksiaGUI) and with the Lichess bot bridge.
 
 ---
 
-## 1. Run GMAI as a UCI engine
+## chess.com is not a supported target
+
+chess.com's fair-play policy prohibits engine assistance in human games, and
+accounts found doing so are closed. The Computer Chess Championship is
+invitation-only and limited to established engines. There is no legitimate
+deployment path.
+
+Lichess provides an official Bot API and labels bot accounts publicly, so
+opponents know what they are playing. It is the supported venue.
+
+---
+
+## Running as a UCI engine
 
 ```bash
 python -m gmai.uci --checkpoint runs/<run>/final.pt
@@ -51,7 +56,7 @@ python -m gmai.uci --checkpoint runs\<run>\final.pt
 
 ---
 
-## 2. Local GUIs
+## Local GUIs
 
 Register `gmai-engine.sh` as a UCI engine in **Arena**, **Cute Chess**, **En Croissant** or **BanksiaGUI**. Cute Chess is the best choice for benchmarking: `cutechess-cli` runs automated matches and computes Elo with error bars.
 
@@ -66,19 +71,19 @@ This is how you get a **real Elo anchor** for the README, rather than only the i
 
 ---
 
-## 3. Lichess bot
+## Lichess bot
 
 `lichess-bot` is the official free bridge between the Lichess Bot API and chess engines. Your bot plays humans and other bots, and the games are viewable live on Lichess.
 
-### Step 1 — a fresh account
+### 1. Create a new account
 
 Create a **brand-new** Lichess account and **play zero games on it**. An account with played games can never be upgraded to a BOT account.
 
-### Step 2 — API token
+### 2. Generate an API token
 
 At `lichess.org/account/oauth/token`, create a personal token with the **"Play bot moves"** scope. Store it — it is shown only once.
 
-### Step 3 — install the bridge
+### 3. Install the bridge
 
 ```bash
 git clone https://github.com/lichess-bot-devs/lichess-bot.git
@@ -86,7 +91,7 @@ cd lichess-bot
 pip install -r requirements.txt
 ```
 
-### Step 4 — point it at GMAI
+### 4. Configure the engine path
 
 In `config.yml`:
 
@@ -106,13 +111,14 @@ challenge:
   modes: ["casual"]                       # go rated once it stops blundering
 ```
 
-### Step 5 — upgrade and run
+### 5. Upgrade the account and run
 
 ```bash
 python lichess-bot.py -u      # -u upgrades the account, then starts playing
 ```
 
-> ⚠️ **The upgrade is irreversible.** That account can only ever be a bot afterwards. This is exactly why step 1 says to use a throwaway account, not your main one.
+> **The upgrade is irreversible.** The account can only ever be a bot
+> afterwards, which is why step 1 specifies a new account.
 
 Subsequent runs need no `-u`:
 
@@ -122,11 +128,14 @@ python lichess-bot.py
 
 ---
 
-## 4. Expectation management
+## Expected performance
 
-A DQN chess agent with a 4096-action head and no search will **not** be strong — expect it to hang pieces well into training. That is the honest, interesting result, not a failure: it is exactly why AlphaZero pairs a network with MCTS rather than acting greedily on Q-values.
+A search-free DQN with a 4096-action head will not be strong, and will hang
+pieces well into training. This is the expected result rather than a defect: it
+is the reason AlphaZero pairs a network with MCTS instead of acting greedily on
+Q-values.
 
-Useful milestones to record in the README:
+Milestones worth recording:
 
 | Milestone | What it demonstrates |
 |---|---|

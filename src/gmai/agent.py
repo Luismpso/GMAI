@@ -63,9 +63,7 @@ class DQNAgent:
         self.gamma = gamma
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
-        self.epsilon_decay = (epsilon_start - epsilon_end) / max(
-            1, epsilon_decay_steps
-        )
+        self.epsilon_decay = (epsilon_start - epsilon_end) / max(1, epsilon_decay_steps)
         self.target_sync_every = target_sync_every
         self.grad_clip = grad_clip
         self.train_steps = 0
@@ -114,10 +112,7 @@ class DQNAgent:
             )
             best_actions = next_q_online.argmax(dim=1, keepdim=True)
             next_q_target = self.target(next_states, safe_masks).gather(1, best_actions)
-            targets = (
-                rewards
-                + self.gamma * (1.0 - terminated) * next_q_target.squeeze(1)
-            )
+            targets = rewards + self.gamma * (1.0 - terminated) * next_q_target.squeeze(1)
 
         td_errors = q_sa - targets
         if batch.weights is not None:  # PER importance-sampling correction
@@ -175,7 +170,7 @@ class DQNAgent:
     @classmethod
     def from_checkpoint(
         cls, path: str | Path, device: str | None = None, **kwargs
-    ) -> "DQNAgent":
+    ) -> DQNAgent:
         """Rebuild an agent with the architecture stored in the checkpoint.
 
         This is what evaluation, play and UCI entry points should use: it

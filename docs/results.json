@@ -1,0 +1,95 @@
+{
+  "checkpoint": "final.pt",
+  "date": "2026-09-04",
+  "games_per_cell": 150,
+  "seed": 0,
+  "endgames": {
+    "KQvK": {
+      "random": {
+        "agent": {
+          "n": 150,
+          "wins": 79,
+          "draws": 71,
+          "losses": 0,
+          "win_rate": 0.5267,
+          "draw_rate": 0.4733,
+          "loss_rate": 0.0,
+          "score": 0.7633,
+          "mean_plies": 18.01,
+          "conversion_failure_rate": 0.4667,
+          "terminations": {
+            "CHECKMATE": 79,
+            "THREEFOLD_REPETITION": 34,
+            "INSUFFICIENT_MATERIAL": 23,
+            "STALEMATE": 13,
+            "TRUNCATED": 1
+          }
+        },
+        "random_baseline": {
+          "n": 150,
+          "wins": 1,
+          "draws": 149,
+          "losses": 0,
+          "win_rate": 0.0067,
+          "draw_rate": 0.9933,
+          "loss_rate": 0.0,
+          "score": 0.5033,
+          "mean_plies": 35.41,
+          "conversion_failure_rate": 0.68,
+          "terminations": {
+            "INSUFFICIENT_MATERIAL": 86,
+            "TRUNCATED": 47,
+            "THREEFOLD_REPETITION": 10,
+            "STALEMATE": 6,
+            "CHECKMATE": 1
+          }
+        }
+      },
+      "stubborn": {
+        "agent": {
+          "n": 150,
+          "wins": 52,
+          "draws": 98,
+          "losses": 0,
+          "win_rate": 0.3467,
+          "draw_rate": 0.6533,
+          "loss_rate": 0.0,
+          "score": 0.6733,
+          "mean_plies": 18.92,
+          "conversion_failure_rate": 0.6333,
+          "terminations": {
+            "CHECKMATE": 52,
+            "INSUFFICIENT_MATERIAL": 41,
+            "THREEFOLD_REPETITION": 40,
+            "STALEMATE": 14,
+            "TRUNCATED": 3
+          }
+        },
+        "random_baseline": {
+          "n": 150,
+          "wins": 1,
+          "draws": 149,
+          "losses": 0,
+          "win_rate": 0.0067,
+          "draw_rate": 0.9933,
+          "loss_rate": 0.0,
+          "score": 0.5033,
+          "mean_plies": 16.48,
+          "conversion_failure_rate": 0.9933,
+          "terminations": {
+            "INSUFFICIENT_MATERIAL": 134,
+            "THREEFOLD_REPETITION": 15,
+            "CHECKMATE": 1
+          }
+        }
+      },
+      "dtm_quality": {
+        "n": 300,
+        "optimal_rate": 0.7,
+        "suboptimal_rate": 0.28,
+        "throw_away_rate": 0.02,
+        "mean_plies_lost": 3.0
+      }
+    }
+  }
+}

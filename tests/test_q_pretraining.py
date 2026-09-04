@@ -6,13 +6,14 @@ but sits ~300 units away from the return scale, and dropping that into a TD
 loop destroys it.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
 
 from gmai.agent import DQNAgent
-from gmai.encoding import N_ACTIONS, encode_board, legal_action_mask
-from gmai.model import masked_q_values
+from gmai.encoding import N_ACTIONS
 from gmai.tablebase import DRAW, EndgameTable
 from gmai.warmstart import (
     MAX_LEGAL,
@@ -21,8 +22,6 @@ from gmai.warmstart import (
     optimal_q_value,
     pretrain_q,
 )
-
-from pathlib import Path
 
 CACHE = Path("tablebases")
 
@@ -36,10 +35,10 @@ def _table_or_skip(kind="KQvK"):
 
 class TestOptimalQValue:
     def test_mate_is_the_maximum(self):
-        mate = optimal_q_value(0, phi_before=0.0, gamma=0.9,
-                               draw_reward=-1.0, mate=True)
-        later = optimal_q_value(6, phi_before=0.0, gamma=0.9,
-                                draw_reward=-1.0, mate=False)
+        mate = optimal_q_value(0, phi_before=0.0, gamma=0.9, draw_reward=-1.0, mate=True)
+        later = optimal_q_value(
+            6, phi_before=0.0, gamma=0.9, draw_reward=-1.0, mate=False
+        )
         assert mate == pytest.approx(1.0)
         assert mate > later
 
@@ -50,8 +49,7 @@ class TestOptimalQValue:
         assert values == sorted(values, reverse=True)
 
     def test_draw_uses_the_draw_reward(self):
-        v = optimal_q_value(DRAW, phi_before=0.0, gamma=0.9,
-                            draw_reward=-1.0, mate=False)
+        v = optimal_q_value(DRAW, phi_before=0.0, gamma=0.9, draw_reward=-1.0, mate=False)
         assert v == pytest.approx(-1.0)
 
     def test_potential_offsets_every_value_equally(self):
@@ -87,12 +85,12 @@ class TestQDataset:
         assert t.min() >= -3.0 and t.max() <= 1.5
 
     def test_padding_slots_are_marked_invalid(self, data):
-        for row, n_valid in zip(data.valid, data.valid.sum(axis=1)):
+        for row, n_valid in zip(data.valid, data.valid.sum(axis=1), strict=True):
             assert row[:n_valid].all()
             assert not row[n_valid:].any()
 
     def test_best_target_beats_the_worst_in_every_position(self, data):
-        for targets, valid in zip(data.targets, data.valid):
+        for targets, valid in zip(data.targets, data.valid, strict=True):
             legal = targets[valid]
             assert legal.max() >= legal.min()
 
@@ -105,16 +103,16 @@ class TestPretrainQ:
     def test_loss_decreases(self, data):
         torch.manual_seed(0)
         agent = DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=0)
-        history = pretrain_q(agent, data, epochs=5, batch_size=64,
-                             ce_weight=0.0, verbose=False)
+        history = pretrain_q(
+            agent, data, epochs=5, batch_size=64, ce_weight=0.0, verbose=False
+        )
         assert history[-1] < history[0]
 
     def test_produces_q_values_on_the_return_scale(self, data):
         """The whole point: pure regression lands near the target range."""
         torch.manual_seed(0)
         agent = DQNAgent(channels=16, n_blocks=2, hidden=64, device="cpu", seed=0)
-        pretrain_q(agent, data, epochs=8, batch_size=64, ce_weight=0.0,
-                   verbose=False)
+        pretrain_q(agent, data, epochs=8, batch_size=64, ce_weight=0.0, verbose=False)
 
         states = torch.from_numpy(data.states[:32])
         actions = torch.from_numpy(data.actions[:32])
@@ -129,8 +127,9 @@ class TestPretrainQ:
         """With ce_weight > 0 training must still converge, not diverge."""
         torch.manual_seed(0)
         agent = DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=0)
-        history = pretrain_q(agent, data, epochs=6, batch_size=64,
-                             ce_weight=1.0, verbose=False)
+        history = pretrain_q(
+            agent, data, epochs=6, batch_size=64, ce_weight=1.0, verbose=False
+        )
         assert np.isfinite(history).all()
         assert history[-1] < history[0]
 
@@ -149,9 +148,9 @@ class TestCalibrateScale:
 
     def test_calibration_preserves_the_greedy_policy(self, data):
         """alpha > 0 means the ranking — and therefore the policy — is unchanged."""
-        import chess
-        from gmai.endgames import sample_endgame
         import random
+
+        from gmai.endgames import sample_endgame
 
         torch.manual_seed(0)
         agent = DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=0)
@@ -174,7 +173,9 @@ class TestCalibrateScale:
         torch.manual_seed(0)
         agent = DQNAgent(channels=8, n_blocks=2, hidden=32, device="cpu", seed=0)
         calibrate_scale(agent, data, verbose=False)
-        for po, pt in zip(agent.online.parameters(), agent.target.parameters()):
+        for po, pt in zip(
+            agent.online.parameters(), agent.target.parameters(), strict=True
+        ):
             assert torch.equal(po, pt)
 
 
