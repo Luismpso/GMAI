@@ -32,7 +32,7 @@ dev = [
   "matplotlib>=3.7",
   "tqdm>=4.66",
   "psutil>=5.9",
-  "ruff>=0.6",
+  "ruff==0.16.6",   # pinned: formatter output differs between releases
 ]
 
 [tool.setuptools.packages.find]
