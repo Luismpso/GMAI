@@ -32,3 +32,9 @@ runs/
 
 # Solver output (rebuild with: python -m gmai.tablebase --kind KQvK)
 tablebases/*.npz
+
+# Datasets and extracted training data
+data/
+*.pgn
+*.pgn.zst
+*.zst
