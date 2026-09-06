@@ -43,8 +43,12 @@ BASE_URL = (
 GOOD_TIME_CONTROLS = frozenset({"rapid", "classical", "blitz"})
 
 PIECE_ORDER = (
-    chess.PAWN, chess.KNIGHT, chess.BISHOP,
-    chess.ROOK, chess.QUEEN, chess.KING,
+    chess.PAWN,
+    chess.KNIGHT,
+    chess.BISHOP,
+    chess.ROOK,
+    chess.QUEEN,
+    chess.KING,
 )
 RESULTS = {"1-0": 1, "0-1": -1, "1/2-1/2": 0}
 
@@ -163,7 +167,10 @@ def parse_block(block: str):
             continue
         if min(white, black) < min_elo or abs(white - black) > max_gap:
             continue
-        if classify_time_control(headers.get("TimeControl", "")) not in GOOD_TIME_CONTROLS:
+        if (
+            classify_time_control(headers.get("TimeControl", ""))
+            not in GOOD_TIME_CONTROLS
+        ):
             continue
         result = RESULTS.get(headers.get("Result", "*"))
         if result is None or headers.get("Termination", "") == "Abandoned":
@@ -188,14 +195,16 @@ def parse_block(block: str):
             np.empty((0, 4), dtype=np.uint8),
             np.empty(0, dtype=np.int16),
             np.empty(0, dtype=np.int8),
-            read, kept,
+            read,
+            kept,
         )
     return (
         np.asarray(boards, dtype=np.uint64),
         np.asarray(metas, dtype=np.uint8),
         np.asarray(actions, dtype=np.int16),
         np.asarray(results, dtype=np.int8),
-        read, kept,
+        read,
+        kept,
     )
 
 
@@ -230,8 +239,9 @@ class ShardWriter:
         )
         size = path.stat().st_size
         self.total_bytes += size
-        print(f"    {path.name}: {self._count:,} positions, {size / 1e6:.0f} MB",
-              flush=True)
+        print(
+            f"    {path.name}: {self._count:,} positions, {size / 1e6:.0f} MB", flush=True
+        )
         self.index += 1
         self._buffers, self._count = [], 0
 
@@ -270,9 +280,12 @@ def extract(args) -> None:
                 elapsed = time.time() - started
                 rate = positions / elapsed
                 left = (args.positions - positions) / max(rate, 1)
-                print(f"  {positions:,}/{args.positions:,} | {rate:,.0f} pos/s "
-                      f"| {games_read:,} read, {games_kept / max(games_read, 1):.1%} kept "
-                      f"| ~{left / 60:.0f} min left", flush=True)
+                print(
+                    f"  {positions:,}/{args.positions:,} | {rate:,.0f} pos/s "
+                    f"| {games_read:,} read, {games_kept / max(games_read, 1):.1%} kept "
+                    f"| ~{left / 60:.0f} min left",
+                    flush=True,
+                )
                 next_report += 500_000
 
             if positions >= args.positions:
@@ -286,21 +299,29 @@ def extract(args) -> None:
         stream.close()
 
     elapsed = time.time() - started
-    (args.out / "manifest.json").write_text(json.dumps({
-        "source": str(args.file or args.month),
-        "min_elo": args.min_elo,
-        "max_elo_gap": args.max_elo_gap,
-        "skip_opening_plies": args.skip_opening_plies,
-        "time_controls": sorted(GOOD_TIME_CONTROLS),
-        "games_read": games_read,
-        "games_kept": games_kept,
-        "positions": positions,
-        "shards": writer.index,
-        "bytes": writer.total_bytes,
-        "seconds": round(elapsed, 1),
-    }, indent=2) + "\n")
+    (args.out / "manifest.json").write_text(
+        json.dumps(
+            {
+                "source": str(args.file or args.month),
+                "min_elo": args.min_elo,
+                "max_elo_gap": args.max_elo_gap,
+                "skip_opening_plies": args.skip_opening_plies,
+                "time_controls": sorted(GOOD_TIME_CONTROLS),
+                "games_read": games_read,
+                "games_kept": games_kept,
+                "positions": positions,
+                "shards": writer.index,
+                "bytes": writer.total_bytes,
+                "seconds": round(elapsed, 1),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
-    print(f"\n{positions:,} positions from {games_kept:,} games in {elapsed / 60:.1f} min")
+    print(
+        f"\n{positions:,} positions from {games_kept:,} games in {elapsed / 60:.1f} min"
+    )
     print(f"{writer.index} shards, {writer.total_bytes / 1e6:.0f} MB total")
 
 

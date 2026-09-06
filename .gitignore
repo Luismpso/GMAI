@@ -24,6 +24,9 @@ runs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
 
 # OS / IDE
 .DS_Store
