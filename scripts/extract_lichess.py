@@ -153,7 +153,7 @@ def parse_block(block: str):
     while True:
         try:
             game = chess.pgn.read_game(stream)
-        except Exception:
+        except Exception:  # noqa: BLE001 - one malformed block must not kill a worker
             break
         if game is None:
             break
@@ -183,6 +183,8 @@ def parse_block(block: str):
                 bitboards, meta = encode_position(board)
                 boards.append(bitboards)
                 metas.append(meta)
+                # Absolute coordinates; the dataloader orients them for the
+                # side to move (chessnet.dataset.orient_actions).
                 actions.append(move.from_square * 64 + move.to_square)
                 results.append(result if board.turn == chess.WHITE else -result)
                 added = True
@@ -240,7 +242,8 @@ class ShardWriter:
         size = path.stat().st_size
         self.total_bytes += size
         print(
-            f"    {path.name}: {self._count:,} positions, {size / 1e6:.0f} MB", flush=True
+            f"    {path.name}: {self._count:,} positions, {size / 1e6:.0f} MB",
+            flush=True,
         )
         self.index += 1
         self._buffers, self._count = [], 0
