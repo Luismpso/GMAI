@@ -1,0 +1,68 @@
+# lichess-bot configuration for ChessNet.
+#
+# bot/run_bot.ps1 fills in the {{...}} paths and writes bot/lichess-bot.yml
+# (git-ignored), then starts lichess-bot with it. Settings not listed here use
+# lichess-bot's own defaults.
+#
+# The Lichess token is never stored in this repository: run_bot.ps1 passes it
+# in the LICHESS_BOT_TOKEN environment variable.
+
+token: ""
+url: "https://lichess.org/"
+
+engine:
+  dir: "{{ENGINE_DIR}}"
+  name: "chessnet_uci.py"           # Launcher that runs ChessNet's UCI loop.
+  protocol: "uci"
+  interpreter: "{{PYTHON}}"         # Python of the venv with torch and chessnet.
+  interpreter_options:
+    - "-u"                          # Unbuffered output: UCI replies arrive at once.
+  engine_options:                   # Command-line flags for chessnet.play.
+    checkpoint: "{{CHECKPOINT}}"
+    uci:
+    nodes: 1000000                  # No node cap: the clock decides how long to think.
+  ponder: false                     # ChessNet does not think on the opponent's time.
+  uci_options: {}                   # ChessNet declares no UCI options; sending one aborts the game.
+  draw_or_resign:                   # The value head is not reliable enough to decide these alone.
+    resign_enabled: false
+    offer_draw_enabled: false
+
+move_overhead: 2000                 # Milliseconds kept in reserve for network lag.
+abort_time: 30                      # Seconds of inactivity before aborting a game.
+quit_after_all_games_finish: true   # First Ctrl+C finishes the current game; a second quits now.
+
+challenge:                          # Incoming challenges.
+  concurrency: 1                    # One game at a time.
+  accept_bot: true
+  only_bot: false
+  min_base: 180                     # At least 3 minutes...
+  max_base: 1800                    # ...and at most 30.
+  min_increment: 1                  # Increment needed: Python search must be safe on time.
+  max_increment: 20
+  variants:
+    - standard
+  time_controls:                    # No bullet: too fast for search in Python plus network lag.
+    - blitz
+    - rapid
+  modes:
+    - casual
+    - rated
+
+greeting:
+  hello: "Hi! I'm {me}: a neural network trained on human Lichess games, with Monte Carlo tree search. Good luck!"
+  goodbye: "Good game!"
+  hello_spectators: "Hi! I'm {me}: a neural network with Monte Carlo tree search."
+  goodbye_spectators: "Thanks for watching!"
+
+matchmaking:                        # Challenge other bots when idle.
+  allow_matchmaking: true
+  allow_during_games: false
+  challenge_timeout: 2              # Minutes idle before challenging.
+  challenge_initial_time:
+    - 180
+    - 300
+  challenge_increment:
+    - 2
+    - 3
+  challenge_mode: "rated"           # Rated games give the bot a real rating.
+  opponent_rating_difference: 300   # Only challenge bots within 300 points.

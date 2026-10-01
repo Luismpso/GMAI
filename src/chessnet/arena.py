@@ -24,6 +24,7 @@ one checkpoint against another) are the reliable part.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import math
 import time
@@ -230,7 +231,9 @@ def run_match(
                 )
             print()
     finally:
-        engine.quit()
+        # Ctrl+C can stop Stockfish first; failing to quit it must not hide that.
+        with contextlib.suppress(chess.engine.EngineError):
+            engine.quit()
     return records
 
 

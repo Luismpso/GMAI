@@ -99,3 +99,36 @@ def test_short_match_against_stockfish(tmp_path):
     expected = [m.uci() for m in opening_board(OPENINGS[0][1]).move_stack]
     assert played == expected, "games must start from the chosen opening"
     assert chess.pgn.read_game(pgn) is not None, "both games are saved"
+
+
+def test_interrupt_is_not_masked_when_stockfish_already_stopped(tmp_path, monkeypatch):
+    # On Windows, Ctrl+C also stops Stockfish; quitting it then fails. The
+    # KeyboardInterrupt must still reach main(), which prints the summary.
+    import chess.engine
+
+    from chessnet import arena
+
+    class StoppedEngine:
+        options = {"UCI_Elo": type("Option", (), {"min": 1320, "max": 3190})()}
+        id = {"name": "Stockfish"}
+
+        def configure(self, settings):
+            pass
+
+        def quit(self):
+            raise chess.engine.EngineTerminatedError("engine event loop dead")
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        chess.engine.SimpleEngine,
+        "popen_uci",
+        staticmethod(lambda *a, **k: StoppedEngine()),
+    )
+    monkeypatch.setattr(arena, "play_game", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        arena.run_match(
+            player=None, stockfish="sf", levels=[1500], games=2, nodes=0,
+            movetime=None, sf_time=0.1, max_plies=10, out_dir=tmp_path,
+        )  # fmt: skip

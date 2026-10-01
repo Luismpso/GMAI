@@ -216,7 +216,7 @@ def _parse_position(tokens: list[str]) -> chess.Board:
     return board
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -232,7 +232,11 @@ def main() -> None:
     ap.add_argument("--c-puct", type=float, default=1.8)
     ap.add_argument("--uci", action="store_true")
     ap.add_argument("--fen", default=chess.STARTING_FEN)
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     player = Player(
         args.checkpoint, args.device, args.temperature, args.nodes, args.c_puct
