@@ -110,12 +110,18 @@ class ShardDataset:
         train: bool = True,
         shuffle: bool = True,
         seed: int | None = None,
+        skip_batches: int = 0,
     ):
+        """Yield (planes, actions, results) batches.
+
+        The order depends only on ``seed``, so ``skip_batches`` lets a resumed
+        run pick up mid-epoch exactly where the interrupted one stopped.
+        """
         idx = self.train_idx if train else self.val_idx
         if shuffle:
             rng = np.random.default_rng(seed)
             idx = rng.permutation(idx)
-        for start in range(0, len(idx), batch_size):
+        for start in range(skip_batches * batch_size, len(idx), batch_size):
             chunk = idx[start : start + batch_size]
             if len(chunk) < 2:  # BatchNorm-free, but keep degenerate batches out
                 continue

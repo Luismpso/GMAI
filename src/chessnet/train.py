@@ -21,6 +21,22 @@ Two ways to decide how long to train:
     to fit, and completes it. One-cycle usually ends slightly better than
     plateau for the same compute, but only if it runs to the end.
 
+Continuing from a checkpoint:
+
+``--resume runs/<run>/last.pt``
+    Picks up exactly where a run stopped (weights, optimizer, learning-rate
+    schedule, step and position within the epoch), in the same run directory.
+    ``last.pt`` is rewritten atomically at every evaluation, so a crash costs
+    at most ``--eval-every`` steps.
+``--init-from runs/<run>/best.pt``
+    Starts a new run from those weights, with a fresh optimizer, a short
+    warm-up and ``--lr``. Use it to continue from a checkpoint that has no
+    optimizer state, or to fine-tune at a lower learning rate.
+
+``--min-delta`` sets how much validation top-1 must improve to count as
+progress for the learning-rate schedule and early stopping, so tiny gains do
+not keep the learning rate high indefinitely.
+
 Progress is written to TensorBoard when it is installed::
 
     tensorboard --logdir runs
@@ -34,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -169,8 +186,24 @@ class _Logger:
 
 
 def train(args) -> Path:
+    if args.resume and args.init_from:
+        raise SystemExit("use either --resume or --init-from, not both")
+    if (args.resume or args.init_from) and args.max_hours:
+        raise SystemExit(
+            "--max-hours measures speed by training throwaway steps and then resets "
+            "the weights, so it cannot be combined with --resume or --init-from"
+        )
+
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     torch.manual_seed(args.seed)
+
+    source = args.resume or args.init_from
+    blob = torch.load(source, map_location="cpu", weights_only=False) if source else None
+    if args.resume and "optimizer" not in blob:
+        raise SystemExit(
+            f"{args.resume} has no optimizer state (saved by an older version). "
+            "Start a new run from its weights with --init-from instead."
+        )
 
     data = ShardDataset(
         args.data, val_fraction=args.val_fraction, seed=args.seed, limit=args.limit
@@ -192,11 +225,15 @@ def train(args) -> Path:
         if device.type == "cuda" and args.channels_last
         else torch.contiguous_format
     )
-    model = ChessNet(channels=args.channels, blocks=args.blocks).to(
-        device, memory_format=memory_format
+    config = (
+        blob["config"] if blob else {"channels": args.channels, "blocks": args.blocks}
     )
+    model = ChessNet(**config)
+    if blob:
+        model.load_state_dict(blob["state_dict"])
+    model = model.to(device, memory_format=memory_format)
     print(
-        f"model : {args.channels}ch x {args.blocks} blocks, "
+        f"model : {config['channels']}ch x {config['blocks']} blocks, "
         f"{model.n_parameters / 1e6:.1f}M parameters on {device}"
     )
     base_model = model
@@ -206,6 +243,8 @@ def train(args) -> Path:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
+    if args.resume:
+        optimizer.load_state_dict(blob["optimizer"])
     steps_per_epoch = max(1, data.n_train // args.batch_size)
     use_amp = device.type == "cuda"
 
@@ -228,34 +267,94 @@ def train(args) -> Path:
             total_steps=epochs * steps_per_epoch,
             pct_start=0.05,
         )
+        if args.resume and blob.get("scheduler"):
+            onecycle.load_state_dict(blob["scheduler"])
     else:
         plateau = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode="max",
             factor=args.lr_decay,
             patience=args.lr_patience,
+            threshold=args.min_delta,
+            threshold_mode="abs",
         )
+        if args.resume and blob.get("scheduler"):
+            plateau.load_state_dict(blob["scheduler"])
         print(
             f"schedule: plateau | eval every {args.eval_every:,} steps "
             f"({args.eval_every * args.batch_size / 1e6:.1f}M positions) | "
-            f"stop after {args.patience} evals without improvement"
+            f"progress means +{args.min_delta:.3f} top-1 | "
+            f"stop after {args.patience} evals without it"
         )
 
-    run_dir = Path(args.out) / time.strftime("%Y%m%d-%H%M%S")
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "config.json").write_text(json.dumps(vars(args), indent=2, default=str))
+    # ------------------------------------------------------------ run state
+    if args.resume:
+        run_dir = Path(args.resume).resolve().parent
+        history_path = run_dir / "history.json"
+        history: list[dict] = (
+            json.loads(history_path.read_text()) if history_path.exists() else []
+        )
+    else:
+        run_dir = Path(args.out) / time.strftime("%Y%m%d-%H%M%S")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "config.json").write_text(
+            json.dumps(vars(args), indent=2, default=str)
+        )
+        history = []
     logger = _Logger(run_dir / "tb")
-    print(f"run   : {run_dir}\n")
+    print(f"run   : {run_dir}")
 
-    history: list[dict] = []
-    best_top1, evals_since_best = 0.0, 0
-    global_step, started_all = 0, time.time()
+    global_step = blob["step"] if args.resume else 0
+    start_epoch = blob.get("epoch", 1) if args.resume else 1
+    start_batch = blob.get("epoch_step", 0) if args.resume else 0
+    # -1 so the first evaluation always writes best.pt, even at 0% accuracy.
+    best_top1 = blob.get("best_top1", -1.0) if args.resume else -1.0
+    ref_top1 = blob.get("ref_top1", best_top1) if args.resume else -1.0
+    evals_since_best = blob.get("evals_since_best", 0) if args.resume else 0
+    if args.resume:
+        print(
+            f"resumed from {args.resume}: step {global_step:,}, epoch {start_epoch}, "
+            f"batch {start_batch:,} | best top-1 {best_top1:.4f} | "
+            f"lr {optimizer.param_groups[0]['lr']:.2e}"
+        )
+    if args.init_from:
+        # Also checks the loaded weights: a damaged file shows up here.
+        start = evaluate(
+            model, data, device, args.batch_size, memory_format=memory_format
+        )
+        best_top1 = ref_top1 = start["top1"]
+        base_model.save(run_dir / "best.pt", step=0, metrics=start)
+        print(
+            f"weights from {args.init_from}: val top1 {start['top1']:.4f} | "
+            f"top5 {start['top5']:.4f} (starting point; best.pt holds them until beaten)"
+        )
+    print()
+
+    started_all = time.time()
     deadline = started_all + args.max_hours * 3600 if args.max_hours else None
     stop_reason = "epochs exhausted"
 
-    def run_eval(epoch: int) -> bool:
-        """Validate, checkpoint, update schedule. Returns True to stop."""
-        nonlocal best_top1, evals_since_best, stop_reason
+    def save_last(epoch: int, epoch_step: int, metrics: dict | None = None) -> None:
+        """Everything needed to resume, written atomically."""
+        extra = {
+            "step": global_step,
+            "epoch": epoch,
+            "epoch_step": epoch_step,
+            "best_top1": best_top1,
+            "ref_top1": ref_top1,
+            "evals_since_best": evals_since_best,
+            "optimizer": optimizer.state_dict(),
+            "scheduler": (plateau or onecycle).state_dict(),
+        }
+        if metrics is not None:
+            extra["metrics"] = metrics
+        tmp = run_dir / "last.pt.tmp"
+        base_model.save(tmp, **extra)
+        os.replace(tmp, run_dir / "last.pt")
+
+    def run_eval(epoch: int, epoch_step: int, end_of_epoch: bool = False) -> bool:
+        """Validate, update the schedule, checkpoint. Returns True to stop."""
+        nonlocal best_top1, ref_top1, evals_since_best, stop_reason
         metrics = evaluate(
             model, data, device, args.batch_size, memory_format=memory_format
         )
@@ -277,33 +376,47 @@ def train(args) -> Path:
             f"{metrics['hours']} h" + ("  * new best" if improved else ""),
             flush=True,
         )
-
-        base_model.save(run_dir / "last.pt", step=global_step, metrics=metrics)
         if improved:
-            best_top1, evals_since_best = metrics["top1"], 0
+            best_top1 = metrics["top1"]
             base_model.save(run_dir / "best.pt", step=global_step, metrics=metrics)
-        elif global_step >= args.warmup_steps:
+
+        stop = False
+        if global_step >= args.warmup_steps:
             # Stalls during warm-up say nothing: the learning rate is still
             # climbing. Only count them once the schedule is in charge.
-            evals_since_best += 1
+            if metrics["top1"] >= ref_top1 + args.min_delta:
+                ref_top1, evals_since_best = metrics["top1"], 0
+            else:
+                evals_since_best += 1
+            if plateau is not None:
+                plateau.step(metrics["top1"])
+                if evals_since_best >= args.patience:
+                    stop_reason = (
+                        f"no progress of +{args.min_delta} in {args.patience} evaluations"
+                    )
+                    stop = True
+                elif optimizer.param_groups[0]["lr"] < args.min_lr:
+                    stop_reason = "learning rate fell below --min-lr"
+                    stop = True
 
-        if plateau is not None and global_step >= args.warmup_steps:
-            plateau.step(metrics["top1"])
-            if evals_since_best >= args.patience:
-                stop_reason = f"no improvement in {args.patience} evaluations"
-                return True
-            if optimizer.param_groups[0]["lr"] < args.min_lr:
-                stop_reason = "learning rate fell below --min-lr"
-                return True
-        return False
+        if end_of_epoch:
+            save_last(epoch + 1, 0, metrics)
+        else:
+            save_last(epoch, epoch_step, metrics)
+        return stop
 
+    epoch, epoch_step = start_epoch, start_batch
     try:
         stop = False
-        for epoch in range(1, epochs + 1):
+        for epoch in range(start_epoch, epochs + 1):
+            epoch_step = start_batch if epoch == start_epoch else 0
             running, seen, correct = [], 0, 0
             t_epoch = time.time()
             for planes, actions, results in data.iter_batches(
-                args.batch_size, train=True, seed=args.seed + epoch
+                args.batch_size,
+                train=True,
+                seed=args.seed + epoch,
+                skip_batches=epoch_step,
             ):
                 planes = planes.to(device, non_blocking=True, memory_format=memory_format)
                 actions = actions.to(device, non_blocking=True)
@@ -331,6 +444,7 @@ def train(args) -> Path:
                 ):
                     onecycle.step()
                 global_step += 1
+                epoch_step += 1
 
                 running.append(policy_loss.item())
                 correct += (logits.argmax(dim=1) == actions).sum().item()
@@ -344,47 +458,61 @@ def train(args) -> Path:
                         "lr": optimizer.param_groups[0]["lr"],
                         "positions_per_s": rate,
                     }
+                    gpu = ""
+                    if device.type == "cuda":
+                        train_metrics["gpu_mem_gb"] = (
+                            torch.cuda.max_memory_allocated() / 1e9
+                        )
+                        gpu = f" | gpu {train_metrics['gpu_mem_gb']:.1f} GB"
                     logger.scalars("train", train_metrics, global_step)
                     print(
                         f"  ep {epoch} step {global_step:>8,} | loss "
                         f"{train_metrics['policy_loss']:.4f} | top1 {correct / seen:.3f} | "
-                        f"{rate:,.0f} pos/s | lr {train_metrics['lr']:.2e}",
+                        f"{rate:,.0f} pos/s | lr {train_metrics['lr']:.2e}{gpu}",
                         flush=True,
                     )
 
                 if (
                     plateau is not None
                     and global_step % args.eval_every == 0
-                    and run_eval(epoch)
+                    and run_eval(epoch, epoch_step)
                 ):
+                    stop = True
+                    break
+
+                if args.max_steps and global_step >= args.max_steps:
+                    stop_reason = "reached --max-steps"
+                    save_last(epoch, epoch_step)
                     stop = True
                     break
 
                 if deadline and time.time() > deadline:
                     stop_reason = "time budget reached"
+                    save_last(epoch, epoch_step)
                     stop = True
                     break
 
             if stop:
                 break
             if onecycle is not None:  # one-cycle validates once per epoch
-                run_eval(epoch)
+                run_eval(epoch, epoch_step, end_of_epoch=True)
     except KeyboardInterrupt:
         stop_reason = "interrupted"
-        print("\ninterrupted: saving last.pt (best.pt already holds the best model)")
-        base_model.save(run_dir / "last.pt", step=global_step)
+        save_last(epoch, epoch_step)
+        print(
+            f"\ninterrupted: state saved. Continue with\n"
+            f"  python -m chessnet.train --data {args.data} --resume {run_dir / 'last.pt'}"
+        )
 
     logger.close()
     hours = (time.time() - started_all) / 3600
     print(f"\nstopped: {stop_reason}")
-    print(
-        f"{hours:.1f} h, {global_step:,} steps. best top-1 {best_top1:.3f} "
-        f"-> {run_dir / 'best.pt'}"
-    )
+    best = f"best top-1 {best_top1:.4f}" if best_top1 >= 0 else "no evaluation yet"
+    print(f"{hours:.1f} h, {global_step:,} steps. {best} -> {run_dir / 'best.pt'}")
     return run_dir
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -393,6 +521,11 @@ def main() -> None:
     ap.add_argument("--channels", type=int, default=192)
     ap.add_argument("--blocks", type=int, default=10)
     ap.add_argument("--batch-size", type=int, default=1024)
+
+    ap.add_argument("--resume", default=None, help="continue a run from its last.pt")
+    ap.add_argument(
+        "--init-from", default=None, help="start a new run from these weights"
+    )
 
     ap.add_argument("--schedule", choices=["plateau", "onecycle"], default="plateau")
     ap.add_argument(
@@ -408,19 +541,28 @@ def main() -> None:
         help="fixed time budget (switches to one-cycle)",
     )
     ap.add_argument(
+        "--max-steps", type=int, default=None, help="stop after this many steps"
+    )
+    ap.add_argument(
         "--eval-every", type=int, default=5000, help="steps between evaluations"
+    )
+    ap.add_argument(
+        "--min-delta",
+        type=float,
+        default=0.001,
+        help="top-1 gain that counts as progress (0.001 = 0.1 points)",
     )
     ap.add_argument(
         "--patience",
         type=int,
         default=6,
-        help="evaluations without improvement before stopping",
+        help="evaluations without progress before stopping",
     )
     ap.add_argument(
         "--lr-patience",
         type=int,
         default=2,
-        help="evaluations without improvement before lowering the LR",
+        help="evaluations without progress before lowering the LR",
     )
     ap.add_argument("--lr-decay", type=float, default=0.3)
     ap.add_argument("--min-lr", type=float, default=1e-6)
@@ -443,7 +585,11 @@ def main() -> None:
         action="store_false",
         help="disable the channels-last memory format on CUDA",
     )
-    train(ap.parse_args())
+    return ap
+
+
+def main() -> None:
+    train(build_parser().parse_args())
 
 
 if __name__ == "__main__":

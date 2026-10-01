@@ -96,13 +96,12 @@ def bitboards_to_planes(boards: np.ndarray, metas: np.ndarray) -> np.ndarray:
     return planes
 
 
-def encode_board(board: chess.Board) -> np.ndarray:
-    """Encode a live ``chess.Board`` the same way the shards are decoded.
+def board_arrays(board: chess.Board) -> tuple[np.ndarray, np.ndarray]:
+    """One position in the stored form: (12,) uint64 bitboards, (4,) uint8 metadata.
 
-    Used at inference time. Must agree with :func:`bitboards_to_planes`
-    exactly — a mismatch here trains on one representation and plays on
-    another, which shows up as an agent that scores well in validation and
-    blunders in real games. ``tests/test_encoding.py`` pins the two together.
+    This is exactly what ``scripts/extract_lichess.py`` writes to the shards.
+    Search collects these for a batch of positions and expands them together
+    with :func:`bitboards_to_planes`, which is much faster than one at a time.
     """
     bitboards = np.array(
         [
@@ -111,7 +110,7 @@ def encode_board(board: chess.Board) -> np.ndarray:
             for pt in PIECE_ORDER
         ],
         dtype=np.uint64,
-    )[None, :]
+    )
     castling = (
         int(board.has_kingside_castling_rights(chess.WHITE))
         | int(board.has_queenside_castling_rights(chess.WHITE)) << 1
@@ -120,16 +119,26 @@ def encode_board(board: chess.Board) -> np.ndarray:
     )
     meta = np.array(
         [
-            [
-                int(board.turn),
-                castling,
-                board.ep_square if board.ep_square is not None else 64,
-                min(board.halfmove_clock, 255),
-            ]
+            int(board.turn),
+            castling,
+            board.ep_square if board.ep_square is not None else 64,
+            min(board.halfmove_clock, 255),
         ],
         dtype=np.uint8,
     )
-    return bitboards_to_planes(bitboards, meta)[0]
+    return bitboards, meta
+
+
+def encode_board(board: chess.Board) -> np.ndarray:
+    """Encode a live ``chess.Board`` the same way the shards are decoded.
+
+    Used at inference time. Must agree with :func:`bitboards_to_planes`
+    exactly: a mismatch trains on one representation and plays on another,
+    which shows up as an agent that scores well in validation and blunders in
+    real games. ``tests/test_chessnet_consistency.py`` pins the two together.
+    """
+    bitboards, meta = board_arrays(board)
+    return bitboards_to_planes(bitboards[None, :], meta[None, :])[0]
 
 
 def move_to_action(move: chess.Move, board: chess.Board) -> int:
