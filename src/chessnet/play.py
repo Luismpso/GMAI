@@ -26,7 +26,7 @@ import chess
 import numpy as np
 import torch
 
-from .encoding import action_to_move, encode_board, legal_action_mask
+from .encoding import N_PLANES, action_to_move, encode_board, legal_action_mask
 from .model import ChessNet, masked_policy
 from .search import MCTS, SearchResult
 
@@ -53,6 +53,19 @@ class Player:
         self.nodes = nodes
         self.search = MCTS(self.model, self.device, c_puct=c_puct, batch_size=batch_size)
         self.last_search: SearchResult | None = None
+        if self.device.type == "cuda":
+            self._warm_up(batch_size)
+
+    @torch.inference_mode()
+    def _warm_up(self, batch_size: int) -> None:
+        """Pay the GPU's one-off start-up costs now rather than on the first move.
+
+        The first CUDA calls in a process load kernels and set up libraries,
+        which can take about a second: enough to lose time on the clock.
+        """
+        for n in (1, batch_size):
+            self.model(torch.zeros(n, N_PLANES, 8, 8, device=self.device))
+        torch.cuda.synchronize()
 
     def select(
         self,
