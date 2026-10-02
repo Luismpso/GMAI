@@ -1,4 +1,8 @@
-# Model card — GMAI
+# Model card — GMAI endgame agent
+
+This card covers the endgame DQN published as `models/final.pt`. ChessNet, the
+full-chess engine in the same repository, is documented in
+[`CHESSNET.md`](CHESSNET.md), including its intended use and limitations.
 
 ## Overview
 
@@ -114,9 +118,10 @@ actions) with promotions resolved to a queen. Irrelevant in these endgames,
 which contain no pawns, but it blocks any widening of scope without an action
 space change.
 
-**No Elo figure is published.** An Elo without an opponent pool and error bars
-is not a measurement. A Stockfish ladder via `cutechess-cli` is on the roadmap;
-until it exists, the tables above are what there is.
+**No Elo figure is published for this model.** An Elo without an opponent pool
+and error bars is not a measurement, and in three-piece endgames win rate and
+distance-to-mate quality say more. The Stockfish arena built for ChessNet
+(`chessnet.arena`) is where Elo is measured in this repository.
 
 ---
 
@@ -126,7 +131,8 @@ A chess endgame model has no meaningful misuse surface. The one honesty
 requirement is not overstating scope, which is why `in_scope` is a first-class
 response field and why the failure modes above are stated in numbers.
 
-If deployed as a Lichess bot, the profile should say it is only competent in
+The Lichess bot in this repository runs ChessNet, not this model. If this model
+were deployed as a bot, its profile should say it is only competent in
 endgames. chess.com's fair-play policy prohibits engine assistance in human
 games, and there is no legitimate way to deploy there.
 

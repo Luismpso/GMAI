@@ -1,5 +1,9 @@
 # Deployment
 
+The service and images below serve the **endgame agent**. ChessNet, the
+full-chess engine, runs as a UCI engine and plays on Lichess; see
+[`PLAYING_ONLINE.md`](PLAYING_ONLINE.md).
+
 The inference service is a container. Everything below assumes a checkpoint at
 `models/final.pt`; copy one there or mount it at runtime.
 

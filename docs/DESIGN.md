@@ -1,6 +1,11 @@
 # Design notes
 
-The decisions behind GMAI, and the reasoning that produced them.
+The decisions behind the GMAI endgame agent, and the reasoning that produced
+them.
+
+> The full-chess engine in this repository, ChessNet, takes the route this
+> document sets aside — a network paired with tree search — and is described
+> in [`CHESSNET.md`](CHESSNET.md).
 
 ---
 

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gmai"
 version = "0.1.0"
-description = "Grand Master AI - a search-free Deep RL chess agent for forced-mate endgames"
+description = "Grand Master AI - chess engines: a policy-value network with tree search for full chess (ChessNet) and a search-free DQN for forced-mate endgames"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -19,6 +19,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+chessnet = [
+  "zstandard>=0.22",     # reading the compressed Lichess archives
+  "tensorboard>=2.15",   # training curves (optional)
+]
 api = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
